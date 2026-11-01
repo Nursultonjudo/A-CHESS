@@ -24,16 +24,23 @@ class _ChessBoardState extends State<ChessBoard> {
 
   static String _glyph(ch.Piece p) {
     // Ikkala rang uchun to'ldirilgan shakl ishlatiladi, rangni o'zimiz beramiz.
-    const glyphs = {
-      ch.PieceType.KING: '♚',
-      ch.PieceType.QUEEN: '♛',
-      ch.PieceType.ROOK: '♜',
-      ch.PieceType.BISHOP: '♝',
-      ch.PieceType.KNIGHT: '♞',
-      ch.PieceType.PAWN: '♟',
-    };
-    // ︎: ba'zi qurilmalarda emoji emas, oddiy belgi ko'rinishi uchun.
-    return '${glyphs[p.type]}︎';
+    final t = p.type;
+    final String g;
+    if (t == ch.PieceType.KING) {
+      g = '\u265A';
+    } else if (t == ch.PieceType.QUEEN) {
+      g = '\u265B';
+    } else if (t == ch.PieceType.ROOK) {
+      g = '\u265C';
+    } else if (t == ch.PieceType.BISHOP) {
+      g = '\u265D';
+    } else if (t == ch.PieceType.KNIGHT) {
+      g = '\u265E';
+    } else {
+      g = '\u265F';
+    }
+    // \uFE0E: ba'zi qurilmalarda emoji emas, oddiy belgi ko'rinishi uchun.
+    return '$g\uFE0E';
   }
 
   void _onTap(String sq) {
