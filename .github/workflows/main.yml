@@ -7,8 +7,6 @@ on:
         description: "Server manzili (masalan https://shaxmat.example.uz)"
         required: true
         default: "http://localhost:3000"
-  push:
-    branches: [main]
 
 env:
   API_URL: ${{ github.event.inputs.api_url || 'http://localhost:3000' }}
@@ -18,6 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fayllarni to'g'ri papkalarga joylash
+        shell: bash
+        run: |
+          mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
+          mv_if pubspec.yaml app
+          for f in main config settings api l10n; do mv_if $f.dart app/lib; done
+          for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
+          mv_if chess_board.dart app/lib/widgets
+          find app -type f
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -46,6 +53,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fayllarni to'g'ri papkalarga joylash
+        shell: bash
+        run: |
+          mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
+          mv_if pubspec.yaml app
+          for f in main config settings api l10n; do mv_if $f.dart app/lib; done
+          for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
+          mv_if chess_board.dart app/lib/widgets
+          find app -type f
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
