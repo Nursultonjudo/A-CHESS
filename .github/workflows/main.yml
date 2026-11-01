@@ -21,7 +21,8 @@ jobs:
         run: |
           mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
           mv_if pubspec.yaml app
-          for f in main config settings api l10n; do mv_if $f.dart app/lib; done
+          mv_if icon.png app/assets
+          for f in main config settings api l10n puzzles; do mv_if $f.dart app/lib; done
           for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
           mv_if chess_board.dart app/lib/widgets
           find app -type f
@@ -35,13 +36,18 @@ jobs:
       - name: Android loyiha papkasini yaratish
         working-directory: app
         run: flutter create --platforms=android --project-name chess_app --org uz.shaxmat .
-      - name: Internet ruxsatini qo'shish
+      - name: Internet ruxsatini va nomini qo'shish
         working-directory: app
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
           sed -i 's#<application#<application android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:label="chess_app"#android:label="A-CHESS"#' android/app/src/main/AndroidManifest.xml
       - run: flutter pub get
         working-directory: app
+      - name: Ikonka o'rnatish
+        working-directory: app
+        continue-on-error: true
+        run: dart run flutter_launcher_icons
       - name: APK yig'ish
         working-directory: app
         shell: bash
@@ -76,7 +82,8 @@ jobs:
         run: |
           mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
           mv_if pubspec.yaml app
-          for f in main config settings api l10n; do mv_if $f.dart app/lib; done
+          mv_if icon.png app/assets
+          for f in main config settings api l10n puzzles; do mv_if $f.dart app/lib; done
           for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
           mv_if chess_board.dart app/lib/widgets
           find app -type f
@@ -86,8 +93,17 @@ jobs:
       - name: Windows loyiha papkasini yaratish
         working-directory: app
         run: flutter create --platforms=windows --project-name chess_app --org uz.shaxmat .
+      - name: Oyna nomini o'zgartirish
+        working-directory: app
+        shell: bash
+        run: |
+          sed -i 's#L"chess_app"#L"A-CHESS"#' windows/runner/main.cpp
       - run: flutter pub get
         working-directory: app
+      - name: Ikonka o'rnatish
+        working-directory: app
+        continue-on-error: true
+        run: dart run flutter_launcher_icons
       - name: Windows dasturini yig'ish
         working-directory: app
         shell: bash
