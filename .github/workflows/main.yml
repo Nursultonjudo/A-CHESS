@@ -46,8 +46,9 @@ jobs:
         working-directory: app
       - name: Ikonka o'rnatish
         working-directory: app
-        continue-on-error: true
-        run: dart run flutter_launcher_icons
+        run: |
+          printf 'flutter_launcher_icons:\n  image_path: "assets/icon.png"\n  android: "launcher_icon"\n  ios: false\n  min_sdk_android: 21\n' > icons.yaml
+          dart run flutter_launcher_icons -f icons.yaml
       - name: APK yig'ish
         working-directory: app
         shell: bash
@@ -102,8 +103,9 @@ jobs:
         working-directory: app
       - name: Ikonka o'rnatish
         working-directory: app
-        continue-on-error: true
-        run: dart run flutter_launcher_icons
+        run: |
+          printf 'flutter_launcher_icons:\n  image_path: "assets/icon.png"\n  android: false\n  ios: false\n  windows:\n    generate: true\n    image_path: "assets/icon.png"\n    icon_size: 256\n' > icons.yaml
+          dart run flutter_launcher_icons -f icons.yaml
       - name: Windows dasturini yig'ish
         working-directory: app
         shell: bash
