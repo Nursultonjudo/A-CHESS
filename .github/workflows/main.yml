@@ -49,6 +49,18 @@ jobs:
         run: |
           printf 'flutter_launcher_icons:\n  image_path: "assets/icon.png"\n  android: "launcher_icon"\n  ios: false\n  min_sdk_android: 21\n' > icons.yaml
           dart run flutter_launcher_icons -f icons.yaml
+      - name: NDK ni oldindan o'rnatish (qayta urinish bilan)
+        shell: bash
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          ok=0
+          for i in 1 2 3 4; do
+            rm -rf "$ANDROID_HOME/ndk/28.2.13676358"
+            if yes | "$SDKM" --install "ndk;28.2.13676358"; then ok=1; break; fi
+            echo "NDK o'rnatish $i-urinish muvaffaqiyatsiz, qayta uriniladi"
+            sleep 15
+          done
+          [ "$ok" = 1 ] || echo "NDK oldindan o'rnatilmadi, Gradle o'zi urinib ko'radi"
       - name: APK yig'ish
         working-directory: app
         shell: bash
