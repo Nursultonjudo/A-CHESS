@@ -22,9 +22,9 @@ jobs:
           mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
           mv_if pubspec.yaml app
           mv_if icon.png app/assets
-          for f in main config settings api l10n puzzles; do mv_if $f.dart app/lib; done
           for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
           mv_if chess_board.dart app/lib/widgets
+          for f in *.dart; do mv_if "$f" app/lib; done
           find app -type f
       - uses: actions/setup-java@v4
         with:
@@ -84,9 +84,9 @@ jobs:
           mv_if() { if [ -f "$1" ]; then mkdir -p "$2"; mv "$1" "$2/"; fi; }
           mv_if pubspec.yaml app
           mv_if icon.png app/assets
-          for f in main config settings api l10n puzzles; do mv_if $f.dart app/lib; done
           for f in home_screen otp_screen register_screen; do mv_if $f.dart app/lib/screens; done
           mv_if chess_board.dart app/lib/widgets
+          for f in *.dart; do mv_if "$f" app/lib; done
           find app -type f
       - uses: subosito/flutter-action@v2
         with:
