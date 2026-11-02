@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          flutter build apk --release --dart-define=API_URL=${{ env.API_URL }} 2>&1 | tee build.log
+          API="$(printf '%s' "$API_URL" | tr -d '[:space:]')"; echo "API_URL = [$API]"; flutter build apk --release "--dart-define=API_URL=$API" 2>&1 | tee build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             {
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          flutter build windows --release --dart-define=API_URL=${{ env.API_URL }} 2>&1 | tee build.log
+          API="$(printf '%s' "$API_URL" | tr -d '[:space:]')"; echo "API_URL = [$API]"; flutter build windows --release "--dart-define=API_URL=$API" 2>&1 | tee build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             {
