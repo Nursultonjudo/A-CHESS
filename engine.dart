@@ -314,10 +314,10 @@ class EngineService {
       pre.add('setoption name UCI_Elo value $elo');
       pre.add('setoption name UCI_LimitStrength value true');
     } else {
-      final lvl = ((elo - 400) / 920 * 5).clamp(0, 5).round();
+      final lvl = ((elo - 400) / 920 * 8).clamp(0, 8).round();
       pre.add('setoption name UCI_LimitStrength value false');
       pre.add('setoption name Skill Level value $lvl');
-      go = 'go depth ${1 + (lvl ~/ 2)}';
+      go = 'go depth ${1 + (lvl ~/ 2)}';  // 1..5
     }
     final post = const [
       'setoption name UCI_LimitStrength value false',

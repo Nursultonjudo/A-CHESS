@@ -9,14 +9,14 @@ import 'widgets/chess_board.dart';
 Future<void> syncProgress(AppSettings s) async {
   final token = s.token;
   if (token == null) return;
-  final days = <String, Map<String, int>>{};
+  final days = <String, Map<String, Object>>{};
   final now = DateTime.now();
   for (var i = 0; i < 30; i++) {
     final k = AppSettings.dayKey(now.subtract(Duration(days: i)));
     final cats = s.catSeconds(k);
     final sec = (s.activity[k] ?? 0) - (cats['passive'] ?? 0);
     final blocks = (s.planDone[k] ?? const <int>[]).length;
-    if (sec > 0 || blocks > 0) days[k] = {'seconds': sec < 0 ? 0 : sec, 'blocks': blocks};
+    if (sec > 0 || blocks > 0) days[k] = {'seconds': sec < 0 ? 0 : sec, 'blocks': blocks, 'cats': cats};
   }
   await Api.post('/me/solved', token, {'solved': s.solved});
   await Api.post('/me/activity', token, {'days': days});
@@ -438,6 +438,8 @@ class StatsView extends StatefulWidget {
 class _StatsViewState extends State<StatsView> {
   Map<String, dynamic>? _me;
   int _period = 0; // 0 bugun, 1 hafta, 2 oy
+  List<Map<String, dynamic>> _students = [];
+  bool get _isCoach => s.role == 'coach';
 
   AppSettings get s => widget.settings;
   Pal get pal => widget.pal;
@@ -456,6 +458,15 @@ class _StatsViewState extends State<StatsView> {
       try {
         await syncProgress(s);
       } catch (_) {}
+      if (_isCoach) {
+        final cs = await Api.get('/coach/students', token);
+        if (mounted) {
+          setState(() => _students = [
+                for (final x in (cs['students'] as List? ?? const []))
+                  Map<String, dynamic>.from(x as Map),
+              ]);
+        }
+      }
       final res = await Api.get('/leaderboard', token);
       if (mounted) setState(() => _me = res['me'] as Map<String, dynamic>?);
     } catch (_) {
@@ -607,6 +618,56 @@ class _StatsViewState extends State<StatsView> {
               style: TextStyle(fontSize: 11.5, color: pal.subtext),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _studentsCard() {
+    return _card(
+      pal,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('st_students'),
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 15.5,
+              color: pal.text,
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (_students.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(t('st_no_students'),
+                  style: TextStyle(color: pal.subtext)),
+            ),
+          for (final st in _students)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(
+                backgroundColor: pal.accentSoft,
+                child: Icon(Icons.person, color: pal.accent),
+              ),
+              title: Text('${st['name']}',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: pal.text)),
+              subtitle: Text(
+                '${t('st_rating')}: ${st['rating']}  ·  ${st['minutes7'] ?? 0} ${t('st_min')} / ${t('week')}',
+                style: TextStyle(color: pal.subtext, fontSize: 12.5),
+              ),
+              trailing: Icon(Icons.chevron_right, color: pal.subtext),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => StudentStatsPage(
+                  settings: s,
+                  pal: pal,
+                  studentId: st['id'] as int,
+                  name: '${st['name']}',
+                ),
+              )),
+            ),
         ],
       ),
     );
@@ -799,17 +860,277 @@ class _StatsViewState extends State<StatsView> {
                 ),
                 const SizedBox(height: 14),
                 _catCard(),
-                const SizedBox(height: 14),
-                _bars(t('st_time_chart'), days, minutes),
-                const SizedBox(height: 14),
-                _bars(t('st_puzzles_chart'), days, solved),
-                const SizedBox(height: 14),
-                _bars(t('st_blocks_chart'), days, blocks),
+                if (!_isCoach) ...[
+                  const SizedBox(height: 14),
+                  _bars(t('st_time_chart'), days, minutes),
+                  const SizedBox(height: 14),
+                  _bars(t('st_puzzles_chart'), days, solved),
+                  const SizedBox(height: 14),
+                  _bars(t('st_blocks_chart'), days, blocks),
+                ],
+                if (_isCoach) ...[
+                  const SizedBox(height: 14),
+                  _studentsCard(),
+                ],
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+
+/// Trener uchun: bitta o'quvchining batafsil statistikasi.
+class StudentStatsPage extends StatefulWidget {
+  const StudentStatsPage({
+    super.key,
+    required this.settings,
+    required this.pal,
+    required this.studentId,
+    required this.name,
+  });
+  final AppSettings settings;
+  final Pal pal;
+  final int studentId;
+  final String name;
+
+  @override
+  State<StudentStatsPage> createState() => _StudentStatsPageState();
+}
+
+class _StudentStatsPageState extends State<StudentStatsPage> {
+  Map<String, dynamic>? _data;
+  bool _err = false;
+  int _period = 1; // 0 bugun, 1 hafta, 2 oy
+
+  Pal get pal => widget.pal;
+  String t(String k) => tr(widget.settings.lang, k);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final res = await Api.get(
+          '/coach/students/${widget.studentId}/stats', widget.settings.token!);
+      if (mounted) setState(() => _data = res);
+    } catch (_) {
+      if (mounted) setState(() => _err = true);
+    }
+  }
+
+  String _fmt(int sec) {
+    final m = (sec / 60).round();
+    if (sec <= 0) return '0 ${t('st_min')}';
+    if (m < 60) return '${m < 1 ? '<1' : '$m'} ${t('st_min')}';
+    return '${m ~/ 60} ${t('st_hour')} ${m % 60} ${t('st_min')}';
+  }
+
+  Widget _tile(String v, String l) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: pal.accentSoft,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(children: [
+            Text(v,
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                    color: pal.text)),
+            Text(l,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11.5, color: pal.subtext)),
+          ]),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _data;
+    Widget body;
+    if (d == null) {
+      body = Center(
+        child: _err
+            ? Text(t('st_load_err'), style: TextStyle(color: pal.text))
+            : const CircularProgressIndicator(),
+      );
+    } else {
+      final st = Map<String, dynamic>.from(d['student'] as Map);
+      final days = [
+        for (final x in (d['days'] as List)) Map<String, dynamic>.from(x as Map)
+      ];
+      final n = _period == 0 ? 1 : (_period == 1 ? 7 : 30);
+      final now = DateTime.now();
+      final from = AppSettings.dayKey(
+          DateTime(now.year, now.month, now.day)
+              .subtract(Duration(days: n - 1)));
+      final sel = [for (final x in days) if ((x['day'] as String).compareTo(from) >= 0) x];
+      final cats = <String, int>{};
+      var total = 0, solved = 0, blocks = 0;
+      for (final x in sel) {
+        total += (x['seconds'] as num).toInt();
+        solved += (x['solved'] as num).toInt();
+        blocks += (x['blocks'] as num).toInt();
+        (x['cats'] as Map).forEach((k, v) {
+          cats[k as String] = (cats[k] ?? 0) + (v as num).toInt();
+        });
+      }
+      final passive = cats['passive'] ?? 0;
+      final catSum = cats.values.fold<int>(0, (a, b) => a + b);
+      final shownTotal = catSum > total ? catSum : total;
+      final maxSec = sel.fold<int>(
+          1, (m, x) => (x['seconds'] as num).toInt() > m ? (x['seconds'] as num).toInt() : m);
+      body = ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _card(
+            pal,
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.name,
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: pal.text)),
+              const SizedBox(height: 10),
+              Row(children: [
+                _tile('${st['rating']}', t('st_rating')),
+                const SizedBox(width: 8),
+                _tile('${st['solvedTotal']}', t('st_solved')),
+                const SizedBox(width: 8),
+                _tile('${st['tasksDone']}/${st['tasksTotal']}', t('st_tasks_done')),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          _card(
+            pal,
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t('st_breakdown'),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15.5,
+                      color: pal.text)),
+              const SizedBox(height: 10),
+              SegmentedButton<int>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment(value: 0, label: Text(t('today'))),
+                  ButtonSegment(value: 1, label: Text(t('week'))),
+                  ButtonSegment(value: 2, label: Text(t('month'))),
+                ],
+                selected: {_period},
+                onSelectionChanged: (v) => setState(() => _period = v.first),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                _tile(_fmt(shownTotal), t('st_total_time')),
+                const SizedBox(width: 8),
+                _tile(_fmt(shownTotal - passive), t('st_active_time')),
+                const SizedBox(width: 8),
+                _tile(_fmt(passive), t('st_cat_passive')),
+              ]),
+              const SizedBox(height: 10),
+              for (final c in [...AppSettings.activeCats, 'passive'])
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(children: [
+                    Expanded(
+                      flex: 5,
+                      child: Text(t('st_cat_$c'),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, color: pal.text)),
+                    ),
+                    Expanded(
+                      flex: 4,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(5),
+                        child: LinearProgressIndicator(
+                          value: shownTotal <= 0
+                              ? 0
+                              : (cats[c] ?? 0) / shownTotal,
+                          minHeight: 8,
+                          backgroundColor: pal.cardBorder,
+                          color: c == 'passive' ? pal.subtext : pal.accent,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 92,
+                      child: Text(_fmt(cats[c] ?? 0),
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, color: pal.text)),
+                    ),
+                  ]),
+                ),
+              const SizedBox(height: 8),
+              Text('${t('st_solved')}: $solved  ·  ${t('st_blocks_chart')}: $blocks',
+                  style: TextStyle(color: pal.subtext, fontSize: 12.5)),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          _card(
+            pal,
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t('st_time_chart'),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15.5,
+                      color: pal.text)),
+              const SizedBox(height: 10),
+              for (final x in sel.reversed)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    SizedBox(
+                      width: 52,
+                      child: Text((x['day'] as String).substring(5),
+                          style: TextStyle(fontSize: 12, color: pal.subtext)),
+                    ),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (x['seconds'] as num).toInt() / maxSec,
+                          minHeight: 8,
+                          backgroundColor: pal.cardBorder,
+                          color: pal.accent,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 84,
+                      child: Text(_fmt((x['seconds'] as num).toInt()),
+                          textAlign: TextAlign.right,
+                          style: TextStyle(fontSize: 12, color: pal.text)),
+                    ),
+                  ]),
+                ),
+            ]),
+          ),
+        ],
+      );
+    }
+    return Scaffold(
+      backgroundColor: pal.bg1,
+      appBar: AppBar(
+        title: Text(widget.name),
+        backgroundColor: pal.bg1,
+        foregroundColor: pal.text,
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: body,
+        ),
+      ),
     );
   }
 }

@@ -157,12 +157,15 @@ class TasksView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  DailyPlanCard(
-                    settings: settings,
-                    pal: pal,
-                    onPlay: onPlay,
-                    onOpen: (p) => _open(context, p),
-                  ),
+                  if (settings.role == 'coach')
+                    CoachCalendarCard(settings: settings, pal: pal)
+                  else
+                    DailyPlanCard(
+                      settings: settings,
+                      pal: pal,
+                      onPlay: onPlay,
+                      onOpen: (p) => _open(context, p),
+                    ),
                   const SizedBox(height: 14),
                   _card(
                     child: Column(

@@ -543,6 +543,135 @@ Future<void> showPlanEditor(
   }
 }
 
+/// Trener uchun: "Vazifalar" oynasidagi kunlik kalendar boshqaruvi.
+class CoachCalendarCard extends StatefulWidget {
+  const CoachCalendarCard({super.key, required this.settings, required this.pal});
+  final AppSettings settings;
+  final Pal pal;
+
+  @override
+  State<CoachCalendarCard> createState() => _CoachCalendarCardState();
+}
+
+class _CoachCalendarCardState extends State<CoachCalendarCard> {
+  List<Map<String, dynamic>> _students = [];
+  bool _loading = true;
+  String? _error;
+
+  AppSettings get s => widget.settings;
+  Pal get pal => widget.pal;
+  String t(String k, [Map<String, String> a = const {}]) => tr(s.lang, k, a);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final token = s.token;
+    if (token == null) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final st = await Api.get('/coach/students', token);
+      if (!mounted) return;
+      setState(() {
+        _students = (st['students'] as List).cast<Map<String, dynamic>>();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = _msg(s, e);
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _card(
+      pal,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.edit_calendar, color: pal.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  t('plc_title'),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: pal.text,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: t('co_refresh'),
+                onPressed: _loading ? null : _load,
+                icon: Icon(Icons.refresh, color: pal.subtext),
+              ),
+            ],
+          ),
+          Text(
+            t('plc_hint'),
+            style: TextStyle(fontSize: 12.5, color: pal.subtext),
+          ),
+          const SizedBox(height: 10),
+          if (_loading)
+            Text(t('co_loading'), style: TextStyle(color: pal.subtext))
+          else if (_error != null)
+            Text(_error!, style: const TextStyle(color: Colors.redAccent))
+          else if (_students.isEmpty)
+            Text(t('co_no_students'), style: TextStyle(color: pal.subtext))
+          else ...[
+            FilledButton.icon(
+              onPressed: () => showPlanEditor(context, s, pal, _students),
+              icon: const Icon(Icons.groups_outlined),
+              label: Text(t('plc_all')),
+            ),
+            for (final st in _students)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        st['name'] as String,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: pal.text,
+                        ),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => showPlanEditor(
+                        context,
+                        s,
+                        pal,
+                        _students,
+                        preselect: (st['id'] as num).toInt(),
+                      ),
+                      icon: const Icon(Icons.edit_calendar, size: 18),
+                      label: Text(t('pl_edit')),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 /// "Vazifalar" bo'limidagi trener qismi: o'quvchi uchun topshiriqlar,
 /// trener uchun boshqaruv paneli.
 class CoachSection extends StatelessWidget {
@@ -914,6 +1043,7 @@ class _CoachPanel extends StatefulWidget {
 class _CoachPanelState extends State<_CoachPanel> {
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _tasks = [];
+  List<Map<String, dynamic>> _invites = [];
   String _invite = '';
   bool _loading = true;
   String? _error;
@@ -928,6 +1058,110 @@ class _CoachPanelState extends State<_CoachPanel> {
     _load();
   }
 
+  Future<void> _newInvite() async {
+    final token = s.token;
+    if (token == null) return;
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('inv_new')),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: t('inv_label'),
+            hintText: t('inv_label_hint'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(t('co_cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(t('co_create')),
+          ),
+        ],
+      ),
+    );
+    final label = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true) return;
+    try {
+      await Api.post('/coach/invites', token, {'label': label});
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_msg(s, e))));
+    }
+  }
+
+  Widget _inviteRow(Map<String, dynamic> inv) {
+    final used = inv['usedBy'] != null;
+    final label = (inv['label'] as String?) ?? '';
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: pal.cardBorder),
+        color: pal.bg1.withAlpha(0x66),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label.isEmpty ? t('inv_no_label') : label,
+                  style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
+                ),
+                Text(
+                  used
+                      ? t('inv_used_by', {'n': '${inv['usedByName'] ?? ''}'})
+                      : t('inv_free'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: used ? const Color(0xFF34D399) : pal.subtext,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            inv['code'] as String,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.5,
+              color: pal.text,
+            ),
+          ),
+          IconButton(
+            tooltip: t('co_copy'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: inv['code'] as String));
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(t('co_copied'))));
+            },
+            icon: Icon(Icons.copy, size: 18, color: pal.accent),
+          ),
+          IconButton(
+            tooltip: t('co_delete'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _post('/coach/invites/${inv['code']}/delete'),
+            icon: Icon(Icons.delete_outline, size: 18, color: pal.subtext),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _load() async {
     final token = s.token;
     if (token == null) return;
@@ -938,8 +1172,10 @@ class _CoachPanelState extends State<_CoachPanel> {
     try {
       final st = await Api.get('/coach/students', token);
       final tk = await Api.get('/coach/tasks', token);
+      final iv = await Api.get('/coach/invites', token);
       if (!mounted) return;
       setState(() {
+        _invites = (iv['invites'] as List).cast<Map<String, dynamic>>();
         _invite = (st['inviteCode'] as String?) ?? '';
         _students = (st['students'] as List).cast<Map<String, dynamic>>();
         _tasks = (tk['tasks'] as List).cast<Map<String, dynamic>>();
@@ -1391,6 +1627,27 @@ class _CoachPanelState extends State<_CoachPanel> {
               ],
             ),
           ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  t('inv_title'),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _newInvite,
+                icon: const Icon(Icons.vpn_key_outlined, size: 18),
+                label: Text(t('inv_new')),
+              ),
+            ],
+          ),
+          Text(
+            t('inv_hint'),
+            style: TextStyle(fontSize: 12, color: pal.subtext),
+          ),
+          for (final inv in _invites) _inviteRow(inv),
           const SizedBox(height: 12),
           Text(
             '${t('co_students')}: ${_students.length}',

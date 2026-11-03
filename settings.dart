@@ -33,12 +33,14 @@ class AppSettings extends ChangeNotifier {
         activity = _loadSolved(_prefs.getString('activity')),
         actCat = _loadCat(_prefs.getString('actCat')),
         soundOn = _prefs.getBool('soundOn') ?? true,
+        soundVolume = _prefs.getDouble('soundVolume') ?? 0.8,
         playVs = _prefs.getBool('playVs') ?? true,
         playSeconds = _prefs.getInt('playSeconds') ?? 600,
         playInc = _prefs.getInt('playInc') ?? 0,
-        playElo = _prefs.getInt('playElo') ?? 1500,
+        playElo = _clampElo(_prefs.getInt('playElo') ?? 1500),
         playSide = _prefs.getInt('playSide') ?? 0,
-        planCfg = _loadPlanCfg(_prefs.getString('planCfg'));
+        planCfg = _loadPlanCfg(_prefs.getString('planCfg')),
+        savedGames = _loadGames(_prefs.getString('savedGames'));
 
   final SharedPreferences _prefs;
 
@@ -65,12 +67,14 @@ class AppSettings extends ChangeNotifier {
   Map<String, List<int>> planDone; // sana -> bajarilgan bloklar
   Map<String, Map<String, int>> actCat; // sana -> bo'lim -> soniyalar
   bool soundOn;
+  double soundVolume; // 0..1
   bool playVs; // true: kompyuterga qarshi, false: ikki o'yinchi
   int playSeconds; // har bir tomon uchun boshlang'ich vaqt
   int playInc; // har bir yurishdan keyin qo'shiladigan soniyalar
   int playElo; // kompyuter kuchi (taxminiy FIDE Elo)
   int playSide; // 0 oq, 1 qora, 2 tasodifiy
   List<Map<String, dynamic>?> planCfg; // trener belgilagan 4 ta blok
+  List<Map<String, dynamic>> savedGames; // o'yinchi saqlagan partiyalar
 
   static Map<String, int> _loadSolved(String? v) {
     if (v == null || v.isEmpty) return {};
@@ -124,6 +128,31 @@ class AppSettings extends ChangeNotifier {
     } catch (_) {
       return {};
     }
+  }
+
+  static int _clampElo(int v) => v < 400 ? 400 : (v > 2850 ? 2850 : v);
+
+  static List<Map<String, dynamic>> _loadGames(String? v) {
+    if (v == null || v.isEmpty) return [];
+    try {
+      return [
+        for (final e in jsonDecode(v) as List) (e as Map).cast<String, dynamic>(),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> addSavedGame(Map<String, dynamic> g) async {
+    savedGames = [g, ...savedGames].take(300).toList();
+    await _prefs.setString('savedGames', jsonEncode(savedGames));
+    notifyListeners();
+  }
+
+  Future<void> deleteSavedGame(int id) async {
+    savedGames = savedGames.where((g) => g['id'] != id).toList();
+    await _prefs.setString('savedGames', jsonEncode(savedGames));
+    notifyListeners();
   }
 
   static List<Map<String, dynamic>?> _loadPlanCfg(String? v) {
@@ -182,6 +211,29 @@ class AppSettings extends ChangeNotifier {
     }
     await _prefs.setString('activity', jsonEncode(activity));
     await _prefs.setString('actCat', jsonEncode(actCat));
+  }
+
+  Future<void> setSoundVolume(double v) async {
+    soundVolume = v.clamp(0.0, 1.0);
+    Sfx.instance.volume = soundVolume;
+    await _prefs.setDouble('soundVolume', soundVolume);
+    notifyListeners();
+  }
+
+  /// Serverdagi yechilgan masalalarni mahalliy ro'yxatga qo'shadi.
+  Future<void> mergeSolved(Map<String, dynamic> server) async {
+    var changed = false;
+    final m = {...solved};
+    server.forEach((k, v) {
+      if (!m.containsKey(k) && v is num) {
+        m[k] = v.toInt();
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    solved = m;
+    await _prefs.setString('solved', jsonEncode(solved));
+    notifyListeners();
   }
 
   Future<void> setSoundOn(bool v) async {
@@ -336,6 +388,7 @@ class AppSettings extends ChangeNotifier {
     applyPieceSet(s.pieceSet);
     applyCoordStyle(s.coordSize, s.coordFont);
     Sfx.instance.enabled = s.soundOn;
+    Sfx.instance.volume = s.soundVolume;
     return s;
   }
 
@@ -367,6 +420,19 @@ class AppSettings extends ChangeNotifier {
   Future<void> applyServerUser(Map<String, dynamic> user) async {
     role = user['role'] as String?;
     inviteCode = user['inviteCode'] as String?;
+    final fn = (user['firstName'] as String?) ?? '';
+    final ln = (user['lastName'] as String?) ?? '';
+    if (fn.isNotEmpty || ln.isNotEmpty) {
+      firstName = fn;
+      lastName = ln;
+      await _prefs.setString('firstName', fn);
+      await _prefs.setString('lastName', ln);
+    }
+    final bd = (user['birthDate'] as String?) ?? '';
+    if (bd.isNotEmpty) {
+      birthDate = bd;
+      await _prefs.setString('birthDate', bd);
+    }
     if (role == null) {
       await _prefs.remove('role');
     } else {
@@ -443,11 +509,44 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Chiqishda shu akkauntga tegishli barcha mahalliy ma'lumotlar tozalanadi
+  /// (til, mavzu, doska va ovoz sozlamalari qoladi). Keyingi kirishda
+  /// ma'lumotlar serverdan qayta yuklanadi.
   Future<void> signOut() async {
     token = null;
     phone = null;
-    await _prefs.remove('token');
-    await _prefs.remove('phone');
+    firstName = '';
+    lastName = '';
+    birthDate = null;
+    avatar = null;
+    role = null;
+    inviteCode = null;
+    solved = {};
+    reviews = {};
+    planDone = {};
+    activity = {};
+    actCat = {};
+    planCfg = List<Map<String, dynamic>?>.filled(4, null);
+    savedGames = [];
+    for (final k in const [
+      'token',
+      'phone',
+      'firstName',
+      'lastName',
+      'birthDate',
+      'avatar',
+      'role',
+      'inviteCode',
+      'solved',
+      'reviews',
+      'planDone',
+      'activity',
+      'actCat',
+      'planCfg',
+      'savedGames',
+    ]) {
+      await _prefs.remove(k);
+    }
     notifyListeners();
   }
 }

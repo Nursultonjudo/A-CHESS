@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' show FontFeature;
 
 import 'package:chess/chess.dart' as ch;
+import 'package:flutter/gestures.dart' show EagerGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -826,6 +827,112 @@ class _ChessBoardState extends State<ChessBoard> {
     _selected = null;
     _targets = [];
     _selMoves = [];
+    _dragFrom = null;
+    _dragActive = false;
+    _hoverSq = null;
+  }
+
+  // ---- Figurani ushlab sudrash (drag and drop) ----
+  String? _dragFrom; // ushlab olingan figura turgan katak
+  bool _dragActive = false; // sichqoncha/barmoq haqiqatan siljidi
+  Offset _dragPos = Offset.zero; // doska ichidagi joriy nuqta
+  Offset _dragStart = Offset.zero;
+  String? _hoverSq;
+  bool _wasSelected = false;
+
+  String? _sqAt(Offset p, double cell) {
+    if (cell <= 0) return null;
+    final col = (p.dx / cell).floor();
+    final row = (p.dy / cell).floor();
+    if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+    return _square(row, col);
+  }
+
+  void _select(String sq) {
+    final moves = widget.game.moves({'verbose': true, 'square': sq}) as List;
+    final list = [
+      for (final m in moves) Map<String, dynamic>.from(m as Map),
+    ];
+    _selected = sq;
+    _selMoves = list;
+    _targets = [for (final m in list) m['to'] as String];
+  }
+
+  void _pDown(Offset p, double cell) {
+    if (!widget.enabled) return;
+    final sq = _sqAt(p, cell);
+    if (sq == null) return;
+    final game = widget.game;
+    _wasSelected = _selected == sq;
+    // Tanlangan figura bor va bu mumkin bo'lgan katak: oddiy bosib yurish.
+    if (_selected != null && _targets.contains(sq)) {
+      _onTap(sq);
+      return;
+    }
+    final piece = game.get(sq);
+    if (piece != null && piece.color == game.turn) {
+      setState(() {
+        _select(sq);
+        _dragFrom = sq;
+        _dragActive = false;
+        _dragStart = p;
+        _dragPos = p;
+        _hoverSq = sq;
+      });
+    } else {
+      setState(_clear);
+    }
+  }
+
+  void _pMove(Offset p, double cell) {
+    if (_dragFrom == null) return;
+    if (!_dragActive && (p - _dragStart).distance < 5) return;
+    setState(() {
+      _dragActive = true;
+      _dragPos = p;
+      _hoverSq = _sqAt(p, cell);
+    });
+  }
+
+  void _pUp(Offset p, double cell) {
+    final from = _dragFrom;
+    if (from == null) return;
+    if (_dragActive) {
+      final target = _sqAt(p, cell);
+      if (target != null && _targets.contains(target)) {
+        _doMove(from, target);
+        return;
+      }
+      setState(() {
+        _dragActive = false;
+        _dragFrom = null;
+        _hoverSq = null;
+        if (target != from) {
+          _selected = null;
+          _targets = [];
+          _selMoves = [];
+        }
+      });
+    } else {
+      setState(() {
+        _dragFrom = null;
+        _hoverSq = null;
+        if (_wasSelected) {
+          _selected = null;
+          _targets = [];
+          _selMoves = [];
+        }
+      });
+    }
+  }
+
+  void _pCancel() {
+    if (_dragFrom == null) return;
+    setState(() {
+      _dragActive = false;
+      _dragFrom = null;
+      _hoverSq = null;
+    });
   }
 
   void _onTap(String sq) {
@@ -834,6 +941,21 @@ class _ChessBoardState extends State<ChessBoard> {
     final from = _selected;
 
     if (from != null && _targets.contains(sq)) {
+      _doMove(from, sq);
+      return;
+    }
+
+    final piece = game.get(sq);
+    if (piece != null && piece.color == game.turn) {
+      setState(() => _select(sq));
+    } else {
+      setState(_clear);
+    }
+  }
+
+  void _doMove(String from, String sq) {
+    final game = widget.game;
+    {
       final mover = game.get(from);
       final target = game.get(sq);
       PieceKind? captured = target == null ? null : kindOf(target.type);
@@ -871,22 +993,6 @@ class _ChessBoardState extends State<ChessBoard> {
       setState(_clear);
       Sfx.instance.playSan(record.san);
       widget.onMoved(record);
-      return;
-    }
-
-    final piece = game.get(sq);
-    if (piece != null && piece.color == game.turn) {
-      final moves = game.moves({'verbose': true, 'square': sq}) as List;
-      final list = [
-        for (final m in moves) Map<String, dynamic>.from(m as Map),
-      ];
-      setState(() {
-        _selected = sq;
-        _selMoves = list;
-        _targets = [for (final m in list) m['to'] as String];
-      });
-    } else {
-      setState(_clear);
     }
   }
 
@@ -974,25 +1080,63 @@ class _ChessBoardState extends State<ChessBoard> {
                   top: frame,
                   width: inner,
                   height: inner,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: pal.frameLine, width: 1.2),
-                    ),
-                    child: Column(
-                      children: [
-                        for (var r = 0; r < 8; r++)
-                          Expanded(
-                            child: Row(
-                              children: [
-                                for (var f = 0; f < 8; f++)
-                                  Expanded(child: _cell(r, f, cell, checked)),
-                              ],
-                            ),
-                          ),
-                      ],
+                  child: RawGestureDetector(
+                    // Telefonda doska ustida sudrash sahifani aylantirmasligi uchun
+                    gestures: {
+                      EagerGestureRecognizer:
+                          GestureRecognizerFactoryWithHandlers<
+                              EagerGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                        (_) {},
+                      ),
+                    },
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: (e) => _pDown(e.localPosition, cell),
+                      onPointerMove: (e) => _pMove(e.localPosition, cell),
+                      onPointerUp: (e) => _pUp(e.localPosition, cell),
+                      onPointerCancel: (_) => _pCancel(),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: pal.frameLine, width: 1.2),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var r = 0; r < 8; r++)
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    for (var f = 0; f < 8; f++)
+                                      Expanded(
+                                          child: _cell(r, f, cell, checked)),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
+                if (_dragActive && _dragFrom != null)
+                  Positioned(
+                    left: frame + _dragPos.dx - cell * 0.58,
+                    top: frame + _dragPos.dy - cell * 0.58,
+                    width: cell * 1.16,
+                    height: cell * 1.16,
+                    child: IgnorePointer(
+                      child: Builder(builder: (_) {
+                        final pc = widget.game.get(_dragFrom!);
+                        if (pc == null) return const SizedBox.shrink();
+                        return PieceView(
+                          kind: kindOf(pc.type),
+                          white: pc.color == ch.Color.WHITE,
+                          size: cell * 1.16,
+                          style: widget.style,
+                        );
+                      }),
+                    ),
+                  ),
               ],
             ),
           );
@@ -1009,9 +1153,10 @@ class _ChessBoardState extends State<ChessBoard> {
     final isLast = sq == widget.lastFrom || sq == widget.lastTo;
     final isSel = sq == _selected;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _onTap(sq),
+    final hiddenPiece = _dragActive && sq == _dragFrom;
+    final hover = _dragActive && sq == _hoverSq && isTarget;
+    return ColoredBox(
+      color: Colors.transparent,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -1030,6 +1175,15 @@ class _ChessBoardState extends State<ChessBoard> {
               decoration: BoxDecoration(
                 gradient: RadialGradient(
                   colors: [Color(0xCCE53935), Color(0x00E53935)],
+                ),
+              ),
+            ),
+          if (hover)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xCCFFFFFF),
+                  width: cell * 0.06,
                 ),
               ),
             ),
@@ -1055,7 +1209,7 @@ class _ChessBoardState extends State<ChessBoard> {
                 ),
               ),
             ),
-          if (piece != null)
+          if (piece != null && !hiddenPiece)
             Padding(
               padding: EdgeInsets.all(cell * 0.02),
               child: AnimatedScale(

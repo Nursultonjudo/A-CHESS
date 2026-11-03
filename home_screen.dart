@@ -14,6 +14,7 @@ import '../coach.dart';
 import '../config.dart';
 import '../engine.dart';
 import '../l10n.dart';
+import '../pgn.dart';
 import '../puzzles.dart';
 import '../lessons.dart';
 import '../settings.dart';
@@ -54,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _endHandled = false;
   bool _engineFail = false;
   bool _setupOpen = true;
+  bool _savedCurrent = false;
   int _thinkId = 0;
   String? _timeoutLoser; // 'white' yoki 'black'
   Timer? _timer;
@@ -122,7 +124,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final user = (jsonDecode(res.body) as Map)['user'] as Map;
         final r = user['rating'];
         if (mounted && r is int) setState(() => _rating = r);
+        final srvFirst = (user['firstName'] as String?) ?? '';
+        final srvLast = (user['lastName'] as String?) ?? '';
+        if (srvFirst.isEmpty && srvLast.isEmpty && s.fullName.isNotEmpty) {
+          // Serverda ism hali yo'q: ro'yxatdan o'tishda kiritilganni yuboramiz.
+          try {
+            await Api.post('/me/name', token, {
+              'firstName': s.firstName,
+              'lastName': s.lastName,
+              'birthDate': s.birthDate ?? '',
+            });
+          } catch (_) {}
+        }
         await s.applyServerUser(user.cast<String, dynamic>());
+        try {
+          final pr = await Api.get('/me/progress', token);
+          await s.mergeSolved((pr['solved'] as Map).cast<String, dynamic>());
+        } catch (_) {}
         if (mounted && s.role == null) {
           await showRoleDialog(context, s, pal);
         }
@@ -216,6 +234,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _log.add(r);
       _addIncrement(r.white);
+      if (_log.length == 1) _setupOpen = false;
     });
     _afterMove();
   }
@@ -266,6 +285,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _endHandled = false;
       _engineFail = false;
       _setupOpen = true;
+      _savedCurrent = false;
       _boardKey++;
     });
     _requestEval();
@@ -292,6 +312,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _maybeEngineMove();
   }
 
+  // ---- Partiyani saqlash -------------------------------------------------
+
+  String get _resultText {
+    if (_timeoutLoser != null) return _timeoutLoser == 'white' ? '0-1' : '1-0';
+    if (_game.in_checkmate) {
+      return _game.turn == ch.Color.WHITE ? '0-1' : '1-0';
+    }
+    if (_game.in_draw) return '1/2-1/2';
+    return '*';
+  }
+
+  Future<void> _saveGame() async {
+    if (_log.isEmpty || _savedCurrent) return;
+    final me = s.fullName.isEmpty ? t('you') : s.fullName;
+    final opp = _vsComputer ? 'Stockfish' : t('opponent');
+    final white = _bottomWhite ? me : opp;
+    final black = _bottomWhite ? opp : me;
+    final now = DateTime.now();
+    String two(int x) => x.toString().padLeft(2, '0');
+    final date = '${now.year}.${two(now.month)}.${two(now.day)}';
+    final res = _resultText;
+    final headers = <String, String>{
+      'Event': 'A-CHESS',
+      'Site': 'A-CHESS',
+      'Date': date,
+      'White': white,
+      'Black': black,
+      'Result': res,
+      'TimeControl': '${_baseSeconds}+$_incSeconds',
+      if (_vsComputer && _userWhite) 'BlackElo': '${_effElo(_elo)}',
+      if (_vsComputer && !_userWhite) 'WhiteElo': '${_effElo(_elo)}',
+    };
+    final pgn = buildPgn(headers, [for (final r in _log) r.san], res);
+    await s.addSavedGame({
+      'id': now.millisecondsSinceEpoch,
+      'date': date,
+      'white': white,
+      'black': black,
+      'result': res,
+      'moves': _log.length,
+      'pgn': pgn,
+    });
+    if (!mounted) return;
+    setState(() => _savedCurrent = true);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(t('pl_game_saved'))));
+  }
+
   // ---- Kompyuter raqib ---------------------------------------------------
 
   bool get _engineTurn =>
@@ -312,15 +380,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     final rnd = math.Random();
     // Past reytingda ba'zan tasodifiy (inson kabi) xato yuradi.
-    final slipP = _elo < 1320 ? (1320 - _elo) / 920 * 0.45 : 0.0;
+    final slipP = _elo < 1000 ? (1000 - _elo) / 600 * 0.35 : 0.0;
     if (rnd.nextDouble() < slipP) {
       final m = legal[rnd.nextInt(legal.length)];
       uci = '${m['from']}${m['to']}${m['promotion'] ?? ''}';
     } else {
       final left = _game.turn == ch.Color.WHITE ? _whiteLeft : _blackLeft;
-      final ms = (left * 1000 ~/ 35 + _incSeconds * 500).clamp(250, 2500).toInt();
+      // Soatga qarab o'ylash vaqti: yuqori kuchda ko'proq, lekin soatga yetadigan.
+      final cap = math.max(150, math.min(4000, left * 125));
+      final ms = (left * 1000 ~/ 40 + _incSeconds * 700).clamp(150, cap).toInt();
       try {
-        uci = await _engine.playMove(_game.fen, elo: _elo, ms: ms);
+        uci = await _engine.playMove(_game.fen, elo: _effElo(_elo), ms: ms);
       } catch (_) {}
     }
     final spent = DateTime.now().difference(started).inMilliseconds;
@@ -381,12 +451,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _log.add(rec);
       _addIncrement(rec.white);
       _thinking = false;
+      if (_log.length == 1) _setupOpen = false;
     });
     Sfx.instance.playSan(san);
     _afterMove();
   }
 
   // ---- O'yin sozlamalari -------------------------------------------------
+
+  /// Ko'rsatilgan reyting -> Stockfish UCI_Elo. Stockfish qisqa vaqtda va
+  /// cheklangan rejimda tirik shaxmatchidan ancha past o'ynagani uchun
+  /// haqiqiy kuch ko'rsatilgan raqamdan yuqoriroq qilib olinadi.
+  int _effElo(int d) {
+    if (d >= 2850) return 3190;
+    final bonus = d < 1000 ? 200 : (d < 1600 ? 300 : 380);
+    return math.min(3190, d + bonus);
+  }
 
   void _setSetup({bool? vs, int? sec, int? inc, int? elo, int? side}) {
     s.setPlayPrefs(vs: vs, seconds: sec, inc: inc, elo: elo, side: side);
@@ -483,7 +563,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       avatar: isMe ? s.avatar : null,
       initials: isMe ? s.initials : '',
       name: name,
-      rating: (!isMe && _vsComputer) ? '$_elo' : '${_rating ?? '—'}',
+      rating: (!isMe && _vsComputer) ? (_elo >= 2850 ? 'MAX' : '$_elo') : '${_rating ?? '—'}',
       subtitle: white ? t('white') : t('black'),
       white: white,
       captured: mine,
@@ -520,6 +600,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
           ),
+          if (over && _log.isNotEmpty)
+            IconButton(
+              tooltip: _savedCurrent ? t('pl_game_saved') : t('pl_save_game'),
+              onPressed: _savedCurrent ? null : _saveGame,
+              icon: Icon(
+                _savedCurrent ? Icons.bookmark_added : Icons.bookmark_add_outlined,
+                color: w.accent,
+              ),
+            ),
         ],
       ),
     );
@@ -596,13 +685,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _eloName(int e) {
     if (e < 800) return t('pl_lv1');
     if (e < 1200) return t('pl_lv2');
-    if (e < 1600) return t('pl_lv3');
-    if (e < 2000) return t('pl_lv4');
-    if (e < 2300) return t('pl_lv5');
-    if (e < 2500) return t('pl_lv6');
-    if (e < 2700) return t('pl_lv7');
-    if (e < 3190) return t('pl_lv8');
-    return t('pl_lv9');
+    if (e < 1500) return t('pl_lv3');
+    if (e < 1900) return t('pl_lv4');
+    if (e < 2050) return t('pl_lv5');
+    if (e < 2200) return t('pl_lv6');
+    if (e < 2350) return t('pl_lv7');
+    if (e < 2600) return t('pl_lv8');
+    if (e < 2850) return t('pl_lv9');
+    return t('pl_lv10');
   }
 
   String _fmtBase() {
@@ -618,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _baseSeconds % 60 != 0 || !presets.contains(_baseSeconds ~/ 60);
     final customInc = !incs.contains(_incSeconds);
     final summary =
-        '${_vsComputer ? 'Stockfish $_elo' : t('pl_two_players')}  ·  ${_fmtBase()}+$_incSeconds';
+        '${_vsComputer ? 'Stockfish ${_elo >= 2850 ? 'MAX' : _elo}' : t('pl_two_players')}  ·  ${_fmtBase()}+$_incSeconds';
 
     Widget label(String key) => Padding(
           padding: const EdgeInsets.only(top: 10, bottom: 6),
@@ -703,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Row(
                         children: [
                           Text(
-                            _elo >= 3190 ? 'MAX' : '$_elo',
+                            _elo >= 2850 ? 'MAX' : '$_elo',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w900,
@@ -721,21 +811,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       Slider(
                         min: 400,
-                        max: 3200,
-                        divisions: 56,
-                        value: _elo.clamp(400, 3200).toDouble(),
+                        max: 2850,
+                        divisions: 49,
+                        value: _elo.clamp(400, 2850).toDouble(),
                         onChanged: (v) {
                           final e = (v / 50).round() * 50;
-                          _setSetup(elo: e >= 3150 ? 3190 : e);
+                          _setSetup(elo: math.max(400, math.min(2850, e)));
                         },
                       ),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
                         children: [
-                          for (final e in const [800, 1200, 1600, 2000, 2400, 2800, 3190])
+                          for (final e in const [800, 1200, 1600, 2000, 2400, 2700, 2850])
                             ChoiceChip(
-                              label: Text(e >= 3190 ? 'MAX' : '$e'),
+                              label: Text(e >= 2850 ? 'MAX' : '$e'),
                               selected: _elo == e,
                               selectedColor: w.accent.withAlpha(0x55),
                               onSelected: (_) => _setSetup(elo: e),
@@ -839,21 +929,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buttons() {
+    Widget lab(String key) => FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(t(key), maxLines: 1, softWrap: false),
+        );
     return Row(
       children: [
         Expanded(
+          flex: 5,
           child: FilledButton.icon(
             onPressed: () => _newGame(),
-            icon: const Icon(Icons.refresh),
-            label: Text(t('new_game')),
+            icon: const Icon(Icons.refresh, size: 20),
+            label: lab('new_game'),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
+          flex: 4,
           child: OutlinedButton.icon(
             onPressed: _log.isEmpty ? null : _undo,
-            icon: const Icon(Icons.undo),
-            label: Text(t('undo')),
+            icon: const Icon(Icons.undo, size: 20),
+            label: lab('undo'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 4,
+          child: OutlinedButton.icon(
+            onPressed: (_log.isEmpty || _savedCurrent) ? null : _saveGame,
+            icon: Icon(
+              _savedCurrent ? Icons.bookmark_added : Icons.bookmark_add_outlined,
+              size: 20,
+            ),
+            label: lab(_savedCurrent ? 'pl_game_saved' : 'pl_save_game'),
           ),
         ),
       ],
@@ -916,59 +1024,71 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _playView(BoxConstraints cc) {
     const gap = 10.0;
     if (cc.maxWidth >= 760) {
-      const panelW = 330.0;
       const cardH = 96.0;
-      const pad = 20.0;
-      final maxH = cc.maxHeight - pad * 2 - cardH * 2 - gap * 2;
-      final maxW = cc.maxWidth - pad * 3 - panelW;
+      const padV = 20.0;
+      const padL = 40.0; // menyu bilan doska orasi (taxminan 1 sm)
+      const between = 28.0; // doska bilan o'ng panel orasi
+      const padR = 24.0;
+      const minPanel = 360.0;
+      final maxH = cc.maxHeight - padV * 2 - cardH * 2 - gap * 2;
+      final maxW = cc.maxWidth - padL - between - padR - minPanel;
       final board = math.max(260.0, math.min(maxH, maxW));
+      final panelW = math.max(
+        minPanel,
+        math.min(720.0, cc.maxWidth - padL - between - padR - board),
+      );
 
-      return Center(
+      return Align(
+        alignment: Alignment.centerLeft,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(pad),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: board,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _playerCard(!_bottomWhite),
-                    const SizedBox(height: gap),
-                    _board(),
-                    const SizedBox(height: gap),
-                    _playerCard(_bottomWhite),
-                  ],
-                ),
-              ),
-              const SizedBox(width: pad),
-              SizedBox(
-                width: panelW,
-                height: board + cardH * 2 + gap * 2,
-                child: Column(
-                  children: [
-                    _statusCard(),
-                    if (s.engineOn) ...[
+          scrollDirection: Axis.horizontal,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(padL, padV, padR, padV),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: board,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _playerCard(!_bottomWhite),
                       const SizedBox(height: gap),
-                      _engineCard(),
+                      _board(),
+                      const SizedBox(height: gap),
+                      _playerCard(_bottomWhite),
                     ],
-                    const SizedBox(height: gap),
-                    _setupCard(math.max(
-                      120.0,
-                      board + cardH * 2 + gap * 2 -
-                          (s.engineOn ? 80 : 0) -
-                          330,
-                    )),
-                    const SizedBox(height: gap),
-                    _buttons(),
-                    const SizedBox(height: gap),
-                    Expanded(child: _moveList()),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: between),
+                SizedBox(
+                  width: panelW,
+                  height: board + cardH * 2 + gap * 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _statusCard(),
+                      if (s.engineOn) ...[
+                        const SizedBox(height: gap),
+                        _engineCard(),
+                      ],
+                      const SizedBox(height: gap),
+                      _setupCard(math.max(
+                        120.0,
+                        board + cardH * 2 + gap * 2 -
+                            (s.engineOn ? 80 : 0) -
+                            330,
+                      )),
+                      const SizedBox(height: gap),
+                      _buttons(),
+                      const SizedBox(height: gap),
+                      Expanded(child: _moveList()),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -998,7 +1118,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(height: gap),
               _buttons(),
               const SizedBox(height: gap),
-              SizedBox(height: 260, child: _moveList()),
+              SizedBox(height: 320, child: _moveList()),
             ],
           ),
         ),
@@ -1222,6 +1342,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       if (v) Sfx.instance.play('move');
                     },
                   ),
+                  if (s.soundOn)
+                    Row(
+                      children: [
+                        Icon(
+                          s.soundVolume < 0.05
+                              ? Icons.volume_mute
+                              : (s.soundVolume < 0.5
+                                  ? Icons.volume_down
+                                  : Icons.volume_up),
+                          color: w.accent,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          t('sound_vol'),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: w.text,
+                          ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            min: 0,
+                            max: 1,
+                            divisions: 20,
+                            value: s.soundVolume.clamp(0.0, 1.0),
+                            label: '${(s.soundVolume * 100).round()}%',
+                            onChanged: (v) => s.setSoundVolume(v),
+                            onChangeEnd: (_) => Sfx.instance.play('capture'),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            '${(s.soundVolume * 100).round()}%',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(color: w.subtext),
+                          ),
+                        ),
+                      ],
+                    ),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1315,6 +1475,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await Api.post('/me/name', token, {
           'firstName': s.firstName,
           'lastName': s.lastName,
+          'birthDate': s.birthDate ?? '',
         });
       } catch (_) {}
     }
@@ -1880,7 +2041,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _logoutButton({double scale = 1}) => _actionButton(
         icon: Icons.logout,
         tooltip: t('logout'),
-        onTap: () => s.signOut(),
+        onTap: () async {
+          // Chiqishdan oldin jarayonni serverga yuboramiz.
+          try {
+            await syncProgress(s).timeout(const Duration(seconds: 6));
+          } catch (_) {}
+          await s.signOut();
+        },
         scale: scale,
       );
 

@@ -11,6 +11,7 @@ import 'game_viewer.dart';
 import 'games_data.dart';
 import 'l10n.dart';
 import 'openings.dart';
+import 'pgn.dart';
 import 'settings.dart';
 import 'widgets/chess_board.dart';
 
@@ -95,6 +96,9 @@ class _LessonsViewState extends State<LessonsView> {
   final _gctl = TextEditingController();
   String _gq = '';
   int _gShown = 40;
+  int _gMode = 0; // 0 ochilish, 1 o'yinchi, 2 davr, 3 natija
+  final Map<int, List<MapEntry<String, List<int>>>> _groupCache = {};
+  final Map<String, int> _groupShown = {};
 
   bool get _isCoach => s.role == 'coach';
 
@@ -559,13 +563,171 @@ class _LessonsViewState extends State<LessonsView> {
     );
   }
 
+  // ---- Namunaviy partiyalarni guruhlash ----------------------------------
+
+  static String _ecoGroup(String eco) {
+    if (eco.length < 3) return 'ZZ';
+    final l = eco[0].toUpperCase();
+    final n = int.tryParse(eco.substring(1, 3)) ?? -1;
+    if (n < 0 || !'ABCDE'.contains(l)) return 'ZZ';
+    String r(int a, int b, String name) =>
+        '$l${a.toString().padLeft(2, '0')}–$l${b.toString().padLeft(2, '0')}  $name';
+    switch (l) {
+      case 'A':
+        if (n <= 3) return r(0, 3, "Uncommon openings, Bird, Polish");
+        if (n <= 9) return r(4, 9, "Réti, Zukertort, King's Indian Attack");
+        if (n <= 39) return r(10, 39, 'English Opening');
+        if (n <= 44) return r(40, 44, "Queen's pawn, Old Benoni, Modern Benoni setups");
+        if (n <= 49) return r(45, 49, 'Indian systems (London, Trompowsky, Torre)');
+        if (n <= 79) return r(50, 79, 'Benoni, Benko Gambit, Budapest, Old Indian');
+        return r(80, 99, 'Dutch Defence');
+      case 'B':
+        if (n <= 9) return r(0, 9, 'Scandinavian, Alekhine, Pirc, Modern');
+        if (n <= 19) return r(10, 19, 'Caro-Kann Defence');
+        if (n <= 49) return r(20, 49, 'Sicilian: Alapin, Closed, Taimanov, Kan');
+        return r(50, 99, 'Sicilian: Najdorf, Dragon, Scheveningen, Sveshnikov');
+      case 'C':
+        if (n <= 19) return r(0, 19, 'French Defence');
+        if (n <= 29) return r(20, 29, "Open games, Vienna, Center Game");
+        if (n <= 39) return r(30, 39, "King's Gambit");
+        if (n <= 49) return r(40, 49, 'Petroff, Scotch, Philidor, Four Knights');
+        if (n <= 59) return r(50, 59, 'Italian Game, Two Knights');
+        return r(60, 99, 'Ruy Lopez (Spanish)');
+      case 'D':
+        if (n <= 5) return r(0, 5, "Queen's pawn, London, Colle");
+        if (n <= 9) return r(6, 9, "Queen's Gambit: Albin, Chigorin, Marshall");
+        if (n <= 19) return r(10, 19, 'Slav Defence');
+        if (n <= 29) return r(20, 29, "Queen's Gambit Accepted");
+        if (n <= 69) return r(30, 69, "Queen's Gambit Declined");
+        return r(70, 99, 'Grünfeld Defence');
+      default:
+        if (n <= 9) return r(0, 9, 'Catalan Opening');
+        if (n <= 19) return r(10, 19, "Queen's Indian, Bogo-Indian");
+        if (n <= 59) return r(20, 59, 'Nimzo-Indian Defence');
+        return r(60, 99, "King's Indian Defence");
+    }
+  }
+
+  List<MapEntry<String, List<int>>> _groups(int mode) {
+    return _groupCache.putIfAbsent(mode, () {
+      final map = <String, List<int>>{};
+      Map<String, int>? counts;
+      if (mode == 1) {
+        counts = {};
+        for (final row in kGameData) {
+          final p = row.split('|');
+          counts[p[0]] = (counts[p[0]] ?? 0) + 1;
+          counts[p[1]] = (counts[p[1]] ?? 0) + 1;
+        }
+      }
+      for (var i = 0; i < kGameData.length; i++) {
+        final p = kGameData[i].split('|');
+        String key;
+        switch (mode) {
+          case 0:
+            key = _ecoGroup(p[6]);
+          case 1:
+            final cn = counts!;
+            final a = cn[p[0]] ?? 0;
+            final b = cn[p[1]] ?? 0;
+            final top = a >= b ? p[0] : p[1];
+            key = (cn[top] ?? 0) >= 8 ? top : 'ZZ';
+          case 2:
+            final y = int.tryParse(p[4].length >= 4 ? p[4].substring(0, 4) : '');
+            key = y == null ? 'ZZ' : '${y ~/ 10 * 10}–${y ~/ 10 * 10 + 9}';
+          default:
+            key = p[5] == '1-0'
+                ? 'A'
+                : (p[5] == '0-1' ? 'B' : (p[5] == '1/2-1/2' ? 'C' : 'ZZ'));
+        }
+        (map[key] ??= []).add(i);
+      }
+      final list = map.entries.toList();
+      if (mode == 1) {
+        list.sort((a, b) {
+          if (a.key == 'ZZ') return 1;
+          if (b.key == 'ZZ') return -1;
+          return b.value.length.compareTo(a.value.length);
+        });
+      } else {
+        list.sort((a, b) => a.key.compareTo(b.key));
+      }
+      return list;
+    });
+  }
+
+  String _groupTitle(int mode, String key) {
+    if (key == 'ZZ') return mode == 2 ? t('ls_unknown') : t('ls_others');
+    if (mode == 3) {
+      return key == 'A'
+          ? t('ls_res_w')
+          : (key == 'B' ? t('ls_res_b') : t('ls_res_d'));
+    }
+    return key;
+  }
+
+  Widget _modeChips() {
+    final names = [
+      t('ls_g_open'),
+      t('ls_g_player'),
+      t('ls_g_era'),
+      t('ls_g_result'),
+    ];
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (var i = 0; i < names.length; i++)
+          ChoiceChip(
+            label: Text(names[i]),
+            selected: _gMode == i,
+            selectedColor: pal.accent.withAlpha(0x55),
+            onSelected: (_) => setState(() => _gMode = i),
+          ),
+      ],
+    );
+  }
+
+  Widget _groupTile(String key, List<int> ids) {
+    final gk = '$_gMode:$key';
+    final shown = _groupShown[gk] ?? 30;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: pal.cardBorder),
+        color: pal.bg1.withAlpha(0x66),
+      ),
+      child: ExpansionTile(
+        shape: const Border(),
+        collapsedShape: const Border(),
+        title: Text(
+          _groupTitle(_gMode, key),
+          style: TextStyle(fontWeight: FontWeight.w800, color: pal.text),
+        ),
+        subtitle: Text(
+          t('db_games', {'n': '${ids.length}'}),
+          style: TextStyle(fontSize: 12.5, color: pal.subtext),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+        children: [
+          for (final i in ids.take(shown)) _gameTile(gameById(i)),
+          if (ids.length > shown)
+            TextButton(
+              onPressed: () => setState(() => _groupShown[gk] = shown + 30),
+              child: Text(t('ls_show_more')),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _gamesCard() {
     final q = _gq.trim().toLowerCase();
+    final searching = q.isNotEmpty;
     final ids = <int>[];
-    for (var i = 0; i < kGameData.length; i++) {
-      if (q.isEmpty) {
-        ids.add(i);
-      } else {
+    if (searching) {
+      for (var i = 0; i < kGameData.length; i++) {
         final row = kGameData[i];
         final head = row.substring(0, row.lastIndexOf('|')).toLowerCase();
         if (head.contains(q)) ids.add(i);
@@ -616,18 +778,125 @@ class _LessonsViewState extends State<LessonsView> {
                     ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          if (!searching) ...[
+            _modeChips(),
+            const SizedBox(height: 10),
+            for (final e in _groups(_gMode)) _groupTile(e.key, e.value),
+          ] else ...[
+            Text(
+              t('db_games', {'n': '${ids.length}'}),
+              style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
+            ),
+            const SizedBox(height: 8),
+            for (final i in shown) _gameTile(gameById(i)),
+            if (ids.length > shown.length)
+              Center(
+                child: TextButton(
+                  onPressed: () => setState(() => _gShown += 40),
+                  child: Text(t('ls_show_more')),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ---- O'yinchining o'zi saqlagan partiyalari -----------------------------
+
+  Widget _savedCard() {
+    final list = s.savedGames;
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.bookmark_added_outlined, color: pal.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  t('ls_my_games'),
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: pal.text,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           Text(
-            t('db_games', {'n': '${ids.length}'}),
-            style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
+            list.isEmpty ? t('ls_no_saved') : t('ls_my_games_hint'),
+            style: TextStyle(fontSize: 12.5, color: pal.subtext),
           ),
           const SizedBox(height: 8),
-          for (final i in shown) _gameTile(gameById(i)),
-          if (ids.length > shown.length)
-            Center(
-              child: TextButton(
-                onPressed: () => setState(() => _gShown += 40),
-                child: Text(t('ls_show_more')),
+          for (final g in list.take(50))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: pal.bg1,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    final games = parsePgn('${g['pgn']}');
+                    if (games.isEmpty) return;
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => GameViewerPage(
+                        settings: s,
+                        pal: pal,
+                        game: games.first,
+                      ),
+                    ));
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: pal.cardBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${g['white']} – ${g['black']}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: pal.text,
+                                ),
+                              ),
+                              Text(
+                                '${g['date']}  ·  ${g['moves']} ${t('ls_moves')}',
+                                style: TextStyle(
+                                    fontSize: 12.5, color: pal.subtext),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '${g['result']}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: pal.accent,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: t('co_delete'),
+                          onPressed: () =>
+                              s.deleteSavedGame((g['id'] as num).toInt()),
+                          icon: Icon(Icons.delete_outline,
+                              size: 20, color: pal.subtext),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
         ],
@@ -734,6 +1003,7 @@ class _LessonsViewState extends State<LessonsView> {
             Text(t('ls_intro'), style: TextStyle(color: pal.subtext)),
             const SizedBox(height: 12),
             _materialsCard(),
+            ListenableBuilder(listenable: s, builder: (_, __) => _savedCard()),
             _gamesCard(),
           ],
         ),
