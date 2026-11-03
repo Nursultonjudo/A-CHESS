@@ -1,0 +1,453 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'sound.dart';
+import 'widgets/chess_board.dart' show applyPieceSet, applyCoordStyle;
+
+/// Til, rejim va kirish ma'lumotlarini saqlaydi.
+class AppSettings extends ChangeNotifier {
+  AppSettings._(this._prefs)
+      : lang = _prefs.getString('lang') ?? 'uz',
+        dark = _prefs.getBool('dark') ?? false,
+        token = _prefs.getString('token'),
+        phone = _prefs.getString('phone'),
+        firstName = _prefs.getString('firstName') ?? '',
+        lastName = _prefs.getString('lastName') ?? '',
+        boardStyle = _prefs.getInt('boardStyle') ?? 0,
+        clockStyle = _prefs.getInt('clockStyle') ?? 0,
+        pieceSet = _prefs.getInt('pieceSetV2') ?? 0,
+        uiStyle = _prefs.getInt('uiStyle') ?? 0,
+        role = _prefs.getString('role'),
+        inviteCode = _prefs.getString('inviteCode'),
+        engineOn = _prefs.getBool('engineOn') ?? true,
+        coordSize = _prefs.getInt('coordSize') ?? 1,
+        coordFont = _prefs.getInt('coordFont') ?? 0,
+        birthDate = _prefs.getString('birthDate'),
+        avatar = _decode(_prefs.getString('avatar')),
+        solved = _loadSolved(_prefs.getString('solved')),
+        reviews = _loadSolved(_prefs.getString('reviews')),
+        planDone = _loadPlan(_prefs.getString('planDone')),
+        activity = _loadSolved(_prefs.getString('activity')),
+        actCat = _loadCat(_prefs.getString('actCat')),
+        soundOn = _prefs.getBool('soundOn') ?? true,
+        playVs = _prefs.getBool('playVs') ?? true,
+        playSeconds = _prefs.getInt('playSeconds') ?? 600,
+        playInc = _prefs.getInt('playInc') ?? 0,
+        playElo = _prefs.getInt('playElo') ?? 1500,
+        playSide = _prefs.getInt('playSide') ?? 0,
+        planCfg = _loadPlanCfg(_prefs.getString('planCfg'));
+
+  final SharedPreferences _prefs;
+
+  String lang;
+  bool dark;
+  String? token;
+  String? phone;
+  String firstName;
+  String lastName;
+  int boardStyle;
+  int clockStyle;
+  int pieceSet;
+  int uiStyle;
+  bool engineOn;
+  String? role; // 'student' | 'coach' | null
+  String? inviteCode; // trenerning taklif kodi
+  int coordSize; // 0 kichik, 1 o'rta, 2 katta
+  int coordFont; // 0 oddiy, 1 antiqa, 2 texnik
+  String? birthDate; // yyyy-MM-dd
+  Uint8List? avatar;
+  Map<String, int> solved;
+  Map<String, int> reviews; // masala id -> bajarilgan takrorlashlar soni
+  Map<String, int> activity; // sana -> ilovada o'tkazilgan soniyalar
+  Map<String, List<int>> planDone; // sana -> bajarilgan bloklar
+  Map<String, Map<String, int>> actCat; // sana -> bo'lim -> soniyalar
+  bool soundOn;
+  bool playVs; // true: kompyuterga qarshi, false: ikki o'yinchi
+  int playSeconds; // har bir tomon uchun boshlang'ich vaqt
+  int playInc; // har bir yurishdan keyin qo'shiladigan soniyalar
+  int playElo; // kompyuter kuchi (taxminiy FIDE Elo)
+  int playSide; // 0 oq, 1 qora, 2 tasodifiy
+  List<Map<String, dynamic>?> planCfg; // trener belgilagan 4 ta blok
+
+  static Map<String, int> _loadSolved(String? v) {
+    if (v == null || v.isEmpty) return {};
+    try {
+      final m = jsonDecode(v) as Map<String, dynamic>;
+      return {for (final e in m.entries) e.key: (e.value as num).toInt()};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  int _actTicks = 0;
+
+  // ---- Faollik: qaysi bo'limda qancha vaqt o'tgani ----------------------------
+  // Bo'limlar: play, train, task, analysis, lessons, rating, stats, passive.
+  static const List<String> activeCats = [
+    'play',
+    'train',
+    'task',
+    'analysis',
+    'lessons',
+    'rating',
+    'stats',
+  ];
+
+  /// Asosiy oyna tegishli bo'lim (HomeScreen belgilaydi).
+  String baseCtx = 'play';
+  final List<String> _ctxStack = [];
+  DateTime _lastTouch = DateTime.now();
+
+  /// Sahifa ochilganda/yopilganda (tahlil, trener vazifasi) chaqiriladi.
+  void pushCtx(String c) => _ctxStack.add(c);
+  void popCtx() {
+    if (_ctxStack.isNotEmpty) _ctxStack.removeLast();
+  }
+
+  /// Foydalanuvchi sichqoncha/ekran/klaviatura bilan harakat qildi.
+  void touch() => _lastTouch = DateTime.now();
+
+  static Map<String, Map<String, int>> _loadCat(String? v) {
+    if (v == null || v.isEmpty) return {};
+    try {
+      final m = jsonDecode(v) as Map<String, dynamic>;
+      return {
+        for (final e in m.entries)
+          e.key: {
+            for (final c in (e.value as Map<String, dynamic>).entries)
+              c.key: (c.value as num).toInt(),
+          },
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static List<Map<String, dynamic>?> _loadPlanCfg(String? v) {
+    final empty = List<Map<String, dynamic>?>.filled(4, null);
+    if (v == null || v.isEmpty) return empty;
+    try {
+      final l = jsonDecode(v) as List;
+      for (var i = 0; i < 4 && i < l.length; i++) {
+        final e = l[i];
+        empty[i] = e is Map ? e.cast<String, dynamic>() : null;
+      }
+    } catch (_) {}
+    return empty;
+  }
+
+  /// Ilova ochiq turgan har bir soniya uchun chaqiriladi.
+  /// [gameRunning] — o'yin davom etmoqda (harakatsiz o'ylash ham faol sanaladi).
+  void tickActivity({bool gameRunning = false}) {
+    final k = dayKey(DateTime.now());
+    activity[k] = (activity[k] ?? 0) + 1;
+    final idle = DateTime.now().difference(_lastTouch).inSeconds > 120 &&
+        !gameRunning;
+    var cat = idle
+        ? 'passive'
+        : (_ctxStack.isNotEmpty ? _ctxStack.last : baseCtx);
+    if (!activeCats.contains(cat)) cat = 'passive';
+    final day = actCat.putIfAbsent(k, () => <String, int>{});
+    day[cat] = (day[cat] ?? 0) + 1;
+    _actTicks++;
+    if (_actTicks % 20 == 0) saveActivity();
+  }
+
+  /// Kun uchun bo'limlar bo'yicha soniyalar. Eski (bo'limsiz) vaqt
+  /// "passiv"ga qo'shiladi.
+  Map<String, int> catSeconds(String day) {
+    final src = actCat[day] ?? const <String, int>{};
+    final out = <String, int>{for (final c in activeCats) c: src[c] ?? 0};
+    final known = src.values.fold<int>(0, (a, b) => a + b);
+    final total = activity[day] ?? 0;
+    out['passive'] = (src['passive'] ?? 0) + (total > known ? total - known : 0);
+    return out;
+  }
+
+  Future<void> saveActivity() async {
+    if (activity.length > 120) {
+      final keys = activity.keys.toList()..sort();
+      for (final old in keys.take(activity.length - 120)) {
+        activity.remove(old);
+      }
+    }
+    if (actCat.length > 120) {
+      final keys = actCat.keys.toList()..sort();
+      for (final old in keys.take(actCat.length - 120)) {
+        actCat.remove(old);
+      }
+    }
+    await _prefs.setString('activity', jsonEncode(activity));
+    await _prefs.setString('actCat', jsonEncode(actCat));
+  }
+
+  Future<void> setSoundOn(bool v) async {
+    soundOn = v;
+    Sfx.instance.enabled = v;
+    await _prefs.setBool('soundOn', v);
+    notifyListeners();
+  }
+
+  /// O'yin sozlamalari: har biri saqlanadi (notifyListeners chaqirilmaydi).
+  Future<void> setPlayPrefs({
+    bool? vs,
+    int? seconds,
+    int? inc,
+    int? elo,
+    int? side,
+  }) async {
+    if (vs != null) {
+      playVs = vs;
+      await _prefs.setBool('playVs', vs);
+    }
+    if (seconds != null) {
+      playSeconds = seconds;
+      await _prefs.setInt('playSeconds', seconds);
+    }
+    if (inc != null) {
+      playInc = inc;
+      await _prefs.setInt('playInc', inc);
+    }
+    if (elo != null) {
+      playElo = elo;
+      await _prefs.setInt('playElo', elo);
+    }
+    if (side != null) {
+      playSide = side;
+      await _prefs.setInt('playSide', side);
+    }
+  }
+
+  Future<void> setPlanCfg(List<Map<String, dynamic>?> cfg) async {
+    planCfg = cfg;
+    await _prefs.setString('planCfg', jsonEncode(cfg));
+    notifyListeners();
+  }
+
+  static const List<int> srsDays = [1, 3, 7, 30];
+
+  /// Masala takrorlash vaqti kelganmi (1, 3, 7, 30 kun).
+  bool isDue(int id) {
+    final t = solved['$id'];
+    if (t == null) return false;
+    final st = reviews['$id'] ?? 0;
+    if (st >= srsDays.length) return false;
+    final due = t + srsDays[st] * 86400000;
+    return DateTime.now().millisecondsSinceEpoch >= due;
+  }
+
+  Future<void> markSolved(int id) async {
+    if (solved.containsKey('$id')) {
+      if (isDue(id)) {
+        reviews = {...reviews, '$id': (reviews['$id'] ?? 0) + 1};
+        await _prefs.setString('reviews', jsonEncode(reviews));
+        notifyListeners();
+      }
+      return;
+    }
+    solved = {...solved, '$id': DateTime.now().millisecondsSinceEpoch};
+    await _prefs.setString('solved', jsonEncode(solved));
+    notifyListeners();
+  }
+
+  static Map<String, List<int>> _loadPlan(String? v) {
+    if (v == null || v.isEmpty) return {};
+    try {
+      final m = jsonDecode(v) as Map<String, dynamic>;
+      return {
+        for (final e in m.entries)
+          e.key: [for (final x in (e.value as List)) (x as num).toInt()],
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static String dayKey(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  List<int> get planToday => planDone[dayKey(DateTime.now())] ?? const [];
+
+  Future<void> setPlanBlock(int i, bool done) async {
+    final k = dayKey(DateTime.now());
+    final cur = {...(planDone[k] ?? const <int>[])};
+    if (done) {
+      cur.add(i);
+    } else {
+      cur.remove(i);
+    }
+    final m = {...planDone, k: cur.toList()..sort()};
+    // eski kunlarni ixchamlash: faqat oxirgi 120 kun
+    if (m.length > 120) {
+      final keys = m.keys.toList()..sort();
+      for (final old in keys.take(m.length - 120)) {
+        m.remove(old);
+      }
+    }
+    planDone = m;
+    await _prefs.setString('planDone', jsonEncode(planDone));
+    notifyListeners();
+  }
+
+  /// Ketma-ket kunlar soni (kamida bitta blok bajarilgan kunlar).
+  int get streak {
+    var d = DateTime.now();
+    var n = 0;
+    if ((planDone[dayKey(d)] ?? const []).isEmpty) {
+      d = d.subtract(const Duration(days: 1));
+    }
+    while ((planDone[dayKey(d)] ?? const []).isNotEmpty) {
+      n++;
+      d = d.subtract(const Duration(days: 1));
+    }
+    return n;
+  }
+
+  static Uint8List? _decode(String? v) {
+    if (v == null || v.isEmpty) return null;
+    try {
+      return base64Decode(v);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String get initials {
+    final a = firstName.isNotEmpty ? firstName[0] : '';
+    final b = lastName.isNotEmpty ? lastName[0] : '';
+    return (a + b).toUpperCase();
+  }
+
+  Future<void> setAvatar(Uint8List? bytes) async {
+    avatar = bytes;
+    if (bytes == null) {
+      await _prefs.remove('avatar');
+    } else {
+      await _prefs.setString('avatar', base64Encode(bytes));
+    }
+    notifyListeners();
+  }
+
+  static Future<AppSettings> load() async {
+    final s = AppSettings._(await SharedPreferences.getInstance());
+    applyPieceSet(s.pieceSet);
+    applyCoordStyle(s.coordSize, s.coordFont);
+    Sfx.instance.enabled = s.soundOn;
+    return s;
+  }
+
+  bool get loggedIn => token != null;
+
+  Future<void> setLang(String value) async {
+    lang = value;
+    await _prefs.setString('lang', value);
+    notifyListeners();
+  }
+
+  Future<void> setDark(bool value) async {
+    dark = value;
+    await _prefs.setBool('dark', value);
+    notifyListeners();
+  }
+
+  String get fullName => '$firstName $lastName'.trim();
+
+  Future<void> setName(String first, String last) async {
+    firstName = first;
+    lastName = last;
+    await _prefs.setString('firstName', first);
+    await _prefs.setString('lastName', last);
+    notifyListeners();
+  }
+
+  /// Serverdan kelgan foydalanuvchi ma'lumotlarini saqlaydi (rol, taklif kodi).
+  Future<void> applyServerUser(Map<String, dynamic> user) async {
+    role = user['role'] as String?;
+    inviteCode = user['inviteCode'] as String?;
+    if (role == null) {
+      await _prefs.remove('role');
+    } else {
+      await _prefs.setString('role', role!);
+    }
+    if (inviteCode == null) {
+      await _prefs.remove('inviteCode');
+    } else {
+      await _prefs.setString('inviteCode', inviteCode!);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setEngineOn(bool v) async {
+    engineOn = v;
+    await _prefs.setBool('engineOn', v);
+    notifyListeners();
+  }
+
+  Future<void> setCoordSize(int v) async {
+    coordSize = v;
+    applyCoordStyle(coordSize, coordFont);
+    await _prefs.setInt('coordSize', v);
+    notifyListeners();
+  }
+
+  Future<void> setCoordFont(int v) async {
+    coordFont = v;
+    applyCoordStyle(coordSize, coordFont);
+    await _prefs.setInt('coordFont', v);
+    notifyListeners();
+  }
+
+  Future<void> setBoardStyle(int v) async {
+    boardStyle = v;
+    await _prefs.setInt('boardStyle', v);
+    notifyListeners();
+  }
+
+  Future<void> setPieceSet(int v) async {
+    pieceSet = v;
+    applyPieceSet(v);
+    await _prefs.setInt('pieceSetV2', v);
+    notifyListeners();
+  }
+
+  Future<void> setUiStyle(int v) async {
+    uiStyle = v;
+    await _prefs.setInt('uiStyle', v);
+    notifyListeners();
+  }
+
+  Future<void> setBirthDate(String? v) async {
+    birthDate = v;
+    if (v == null) {
+      await _prefs.remove('birthDate');
+    } else {
+      await _prefs.setString('birthDate', v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setClockStyle(int v) async {
+    clockStyle = v;
+    await _prefs.setInt('clockStyle', v);
+    notifyListeners();
+  }
+
+  Future<void> signIn(String newToken, String newPhone) async {
+    token = newToken;
+    phone = newPhone;
+    await _prefs.setString('token', newToken);
+    await _prefs.setString('phone', newPhone);
+    notifyListeners();
+  }
+
+  Future<void> signOut() async {
+    token = null;
+    phone = null;
+    await _prefs.remove('token');
+    await _prefs.remove('phone');
+    notifyListeners();
+  }
+}
