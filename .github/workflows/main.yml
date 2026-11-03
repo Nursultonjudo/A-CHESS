@@ -138,6 +138,37 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit $code
+      - name: Stockfish 18 yuklab olish (Windows)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p sf
+          cd sf
+          ok=0
+          for tag in sf_18 ""; do
+            for pat in "stockfish-windows-x86-64-avx2.zip" "*windows-x86-64-avx2*" "*windows-x86-64-bmi2*" "*windows-x86-64.zip"; do
+              if gh release download $tag -R official-stockfish/Stockfish -p "$pat" --clobber; then ok=1; break; fi
+            done
+            [ "$ok" = 1 ] && break
+          done
+          if [ "$ok" = 1 ]; then
+            for z in *.zip; do unzip -oq "$z"; done
+            exe=$(find . -iname "stockfish*.exe" | head -1)
+            echo "Topilgan exe: $exe"
+            OUT=../app/build/windows/x64/runner/Release
+            if [ -n "$exe" ]; then
+              mkdir -p "$OUT/engine"
+              cp "$exe" "$OUT/engine/stockfish.exe"
+              find . \( -iname "Copying*" -o -iname "AUTHORS*" -o -iname "README*" \) -exec cp {} "$OUT/engine/" \;
+              ls -la "$OUT/engine"
+              echo uci | timeout 15 "$OUT/engine/stockfish.exe" | head -3
+            fi
+          else
+            echo "::warning::Stockfish 18 yuklab olinmadi; ilova ichki dvigateldan foydalanadi"
+          fi
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: shaxmat-windows
