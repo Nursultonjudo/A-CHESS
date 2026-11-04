@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'desktop_shortcut.dart';
 import 'l10n.dart';
 import 'screens/home_screen.dart';
 import 'screens/register_screen.dart';
@@ -18,6 +19,7 @@ Future<void> main() async {
   }
 
   runApp(ChessApp(settings: settings));
+  ensureDesktopShortcut();
 }
 
 class ChessApp extends StatelessWidget {

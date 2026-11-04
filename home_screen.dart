@@ -6,6 +6,9 @@ import 'dart:ui' as ui;
 
 import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
+import '../page_frame.dart';
+import '../robot_button.dart';
+import '../ai_chat.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 
@@ -181,8 +184,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // ---- O'yin holati -------------------------------------------------------
 
+  bool _drawAgreed = false; // ikki tomon kelishib durang qildi
+  bool _drawBusy = false;
+
   bool get _over =>
-      _game.in_checkmate || _game.in_draw || _timeoutLoser != null;
+      _game.in_checkmate || _game.in_draw || _timeoutLoser != null || _drawAgreed;
 
   String get _status {
     if (_thinking) return t('pl_thinking');
@@ -194,6 +200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final winner = _game.turn == ch.Color.WHITE ? t('black') : t('white');
       return t('checkmate', {'winner': winner});
     }
+    if (_drawAgreed) return t('draw_agreed');
     if (_game.in_draw) return t('draw');
     final turn =
         _game.turn == ch.Color.WHITE ? t('turn_white') : t('turn_black');
@@ -284,6 +291,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _whiteLeft = _baseSeconds;
       _blackLeft = _baseSeconds;
       _timeoutLoser = null;
+      _drawAgreed = false;
       _thinking = false;
       _endHandled = false;
       _engineFail = false;
@@ -294,6 +302,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _requestEval();
     if (sound) Sfx.instance.play('start');
     _maybeEngineMove();
+  }
+
+  /// Durang taklif qilish.
+  Future<void> _offerDraw() async {
+    if (_over || _log.length < 2 || _drawBusy || _thinking) return;
+    final msg = ScaffoldMessenger.of(context);
+    if (_vsComputer) {
+      setState(() => _drawBusy = true);
+      var accept = false;
+      try {
+        final e = await _engine.evalOnce(_game.fen, 700);
+        if (e != null) {
+          final compWhite = !_userWhite;
+          final mate = e.mate;
+          final cp = e.cp ?? 0;
+          final compCp = compWhite ? cp : -cp;
+          final compMate = mate == null ? null : (compWhite ? mate : -mate);
+          final thr = _elo >= 2500 ? 30 : 90; // kuchli kompyuter faqat teng yoki yomon holatda rozi
+          accept = (compMate == null || compMate < 0) && compCp <= thr;
+        } else {
+          accept = _log.length >= 60;
+        }
+      } catch (_) {
+      } finally {
+        _engine.endBatch();
+      }
+      if (!mounted) return;
+      setState(() => _drawBusy = false);
+      if (_over) return;
+      if (accept) {
+        _acceptDraw();
+      } else {
+        msg.showSnackBar(SnackBar(content: Text(t('pl_draw_declined'))));
+      }
+    } else {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(t('pl_draw_offer')),
+          content: Text(t('pl_draw_ask')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(t('pl_draw_no')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(t('pl_draw_yes')),
+            ),
+          ],
+        ),
+      );
+      if (ok == true && mounted && !_over) _acceptDraw();
+    }
+  }
+
+  void _acceptDraw() {
+    _thinkId++;
+    setState(() {
+      _drawAgreed = true;
+      _thinking = false;
+    });
+    _handleEnd();
+    _requestEval();
   }
 
   void _undo() {
@@ -308,6 +380,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _log.isNotEmpty &&
           ((_game.turn == ch.Color.WHITE) != _userWhite));
       _timeoutLoser = null;
+      _drawAgreed = false;
       _endHandled = false;
       _boardKey++;
     });
@@ -322,7 +395,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_game.in_checkmate) {
       return _game.turn == ch.Color.WHITE ? '0-1' : '1-0';
     }
-    if (_game.in_draw) return '1/2-1/2';
+    if (_drawAgreed || _game.in_draw) return '1/2-1/2';
     return '*';
   }
 
@@ -383,15 +456,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     final rnd = math.Random();
     // Past reytingda ba'zan tasodifiy (inson kabi) xato yuradi.
-    final slipP = _elo < 1000 ? (1000 - _elo) / 600 * 0.35 : 0.0;
+    final slipP = _elo < 1000 ? (1000 - _elo) / 600 * 0.18 : 0.0;
     if (rnd.nextDouble() < slipP) {
       final m = legal[rnd.nextInt(legal.length)];
       uci = '${m['from']}${m['to']}${m['promotion'] ?? ''}';
     } else {
       final left = _game.turn == ch.Color.WHITE ? _whiteLeft : _blackLeft;
       // Soatga qarab o'ylash vaqti: yuqori kuchda ko'proq, lekin soatga yetadigan.
-      final cap = math.max(150, math.min(4000, left * 125));
-      final ms = (left * 1000 ~/ 40 + _incSeconds * 700).clamp(150, cap).toInt();
+      final maxLevel = _elo >= 2850;
+      final cap = math.max(150, math.min(maxLevel ? 8000 : 4000, left * 125));
+      var ms = (left * 1000 ~/ 40 + _incSeconds * 700).clamp(150, cap).toInt();
+      if (maxLevel) ms = math.min(cap, (ms * 1.8).round());
       try {
         uci = await _engine.playMove(_game.fen, elo: _effElo(_elo), ms: ms);
       } catch (_) {}
@@ -467,8 +542,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// haqiqiy kuch ko'rsatilgan raqamdan yuqoriroq qilib olinadi.
   int _effElo(int d) {
     if (d >= 2850) return 3190;
-    final bonus = d < 1000 ? 200 : (d < 1600 ? 300 : 380);
-    return math.min(3190, d + bonus);
+    // (ko'rsatilgan reyting, dvigatelga beriladigan UCI_Elo) tayanch nuqtalari
+    const pts = <List<int>>[
+      [400, 650],
+      [800, 1200],
+      [1000, 1500],
+      [1200, 1800],
+      [1500, 2150],
+      [1800, 2450],
+      [2000, 2650],
+      [2200, 2850],
+      [2500, 3050],
+      [2700, 3150],
+      [2850, 3190],
+    ];
+    for (var i = 1; i < pts.length; i++) {
+      if (d <= pts[i][0]) {
+        final a = pts[i - 1], b = pts[i];
+        final f = (d - a[0]) / (b[0] - a[0]);
+        return (a[1] + (b[1] - a[1]) * f).round();
+      }
+    }
+    return 3190;
   }
 
   void _setSetup({bool? vs, int? sec, int? inc, int? elo, int? side}) {
@@ -689,11 +784,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (e < 800) return t('pl_lv1');
     if (e < 1200) return t('pl_lv2');
     if (e < 1500) return t('pl_lv3');
-    if (e < 1900) return t('pl_lv4');
-    if (e < 2050) return t('pl_lv5');
+    if (e < 1800) return t('pl_lv4');
+    if (e < 2000) return t('pl_lv5');
     if (e < 2200) return t('pl_lv6');
-    if (e < 2350) return t('pl_lv7');
-    if (e < 2600) return t('pl_lv8');
+    if (e < 2500) return t('pl_lv7');
+    if (e < 2700) return t('pl_lv8');
     if (e < 2850) return t('pl_lv9');
     return t('pl_lv10');
   }
@@ -826,7 +921,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         spacing: 6,
                         runSpacing: 6,
                         children: [
-                          for (final e in const [800, 1200, 1600, 2000, 2400, 2700, 2850])
+                          for (final e in const [800, 1200, 1600, 2000, 2500, 2700, 2850])
                             ChoiceChip(
                               label: Text(e >= 2850 ? 'MAX' : '$e'),
                               selected: _elo == e,
@@ -936,7 +1031,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           fit: BoxFit.scaleDown,
           child: Text(t(key), maxLines: 1, softWrap: false),
         );
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
       children: [
         Expanded(
           flex: 5,
@@ -966,6 +1064,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             label: lab(_savedCurrent ? 'pl_game_saved' : 'pl_save_game'),
           ),
+        ),
+      ],
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: (_over || _log.length < 2 || _drawBusy || _thinking)
+              ? null
+              : _offerDraw,
+          icon: const Icon(Icons.handshake_outlined, size: 20),
+          label: lab('pl_draw'),
         ),
       ],
     );
@@ -1223,13 +1331,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           _showProfile = false;
                         }),
                       )
-                    : (_tab == 5
+                    : (_tab == 6 && s.role != 'coach'
+                        ? AiChatView(settings: s, pal: pal)
+                        : (_tab == 5
                         ? _settingsView()
                         : (_tab == 4
                         ? LessonsView(settings: s, pal: pal)
                         : (_tab == 1
                             ? RatingView(settings: s, pal: pal)
-                            : StatsView(settings: s, pal: pal)))))),
+                            : StatsView(settings: s, pal: pal))))))),
       );
 
 
@@ -1242,10 +1352,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       (false, Icons.light_mode_outlined, t('light')),
       (true, Icons.dark_mode_outlined, t('dark')),
     ];
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: ListView(
+    return PageFrame(child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Container(
@@ -1417,9 +1524,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
           ],
-        ),
-      ),
-    );
+        ));
   }
 
   // ---- Shaxsiy kabinet ----------------------------------------------------
@@ -2075,6 +2180,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (Icons.assignment, t('nav_tasks')),
         (Icons.menu_book, t('nav_lessons')),
         (Icons.settings, t('nav_settings')),
+        if (s.role != 'coach') (Icons.smart_toy, 'A-CHESS AI'),
       ];
 
   Widget _navTile(IconData icon, String label, int i) {
@@ -2185,6 +2291,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _aiTile() {
+    final sel = !_showProfile && _tab == 6;
+    const cyan = Color(0xFF58E6FF);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _selectTab(6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                colors: [
+                  cyan.withAlpha(sel ? 0x40 : 0x1C),
+                  pal.accent.withAlpha(sel ? 0x40 : 0x14),
+                ],
+              ),
+              border: Border.all(
+                color: sel ? cyan : cyan.withAlpha(0x66),
+                width: sel ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                const RobotFace(size: 60, color: cyan),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'A-CHESS AI',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: pal.navText,
+                        ),
+                      ),
+                      Text(
+                        t('ai_sub'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: pal.navText.withAlpha(0xB0),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _sideNav() {
     final tabs = _tabs;
     return Container(
@@ -2203,9 +2371,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.fromLTRB(18, 24, 18, 22),
               child: _logo(),
             ),
-            for (var i = 0; i < tabs.length; i++)
+            for (var i = 0; i < tabs.length && i < 6; i++)
               _navTile(tabs[i].$1, tabs[i].$2, i),
             const Spacer(),
+            if (s.role != 'coach') _aiTile(),
             _profileTile(),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),

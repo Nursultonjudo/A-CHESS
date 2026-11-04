@@ -381,7 +381,16 @@ class DailyPlanCard extends StatelessWidget {
     final matId = (cfg?['materialId'] as num?)?.toInt();
     final done = settings.planToday;
     final isDone = done.contains(i);
-    final unlocked = i == 0 || done.contains(i - 1);
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final openFrom = (cfg?['openFrom'] as num?)?.toInt();
+    final openUntil = (cfg?['openUntil'] as num?)?.toInt();
+    final lockOut = (cfg?['lockOutside'] as bool?) ?? true;
+    // 1 = hali ochilmagan, 2 = muddati tugagan
+    final winState = openFrom != null && nowMs < openFrom
+        ? 1
+        : (openUntil != null && nowMs > openUntil ? 2 : 0);
+    final winLocked = lockOut && winState != 0 && !isDone;
+    final unlocked = (i == 0 || done.contains(i - 1)) && !winLocked;
     final current = !isDone && unlocked;
     final accent = pal.accent;
     final color = isDone
@@ -471,6 +480,17 @@ class DailyPlanCard extends StatelessWidget {
             extra.isEmpty ? t('plan_b${i + 1}d') : extra,
             style: TextStyle(fontSize: 12.5, color: pal.subtext),
           ),
+          if ((openFrom != null || openUntil != null) && !winLocked && !isDone)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                [
+                  if (openFrom != null) fmtDateTimeMs(openFrom),
+                  if (openUntil != null) '→ ${fmtDateTimeMs(openUntil)}',
+                ].join(' '),
+                style: TextStyle(fontSize: 12, color: pal.subtext),
+              ),
+            ),
           const SizedBox(height: 12),
           if (isDone)
             Align(
@@ -479,6 +499,24 @@ class DailyPlanCard extends StatelessWidget {
                 onPressed: () => settings.setPlanBlock(i, false),
                 child: Text(t('plan_done')),
               ),
+            )
+          else if (winLocked)
+            Row(
+              children: [
+                Icon(Icons.lock_clock, size: 18, color: pal.subtext),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    winState == 1
+                        ? t('pl_not_open', {'t': fmtDateTimeMs(openFrom!)})
+                        : t('pl_expired', {'t': fmtDateTimeMs(openUntil!)}),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: pal.subtext,
+                    ),
+                  ),
+                ),
+              ],
             )
           else if (!unlocked)
             Text(

@@ -309,6 +309,9 @@ class EngineService {
     if (elo >= 3190) {
       pre.add('setoption name UCI_LimitStrength value false');
       pre.add('setoption name Skill Level value 20');
+      // Maksimal daraja: ko'proq oqim va xotira (kuchliroq o'yin)
+      pre.add('setoption name Threads value 4');
+      pre.add('setoption name Hash value 256');
     } else if (elo >= 1320) {
       pre.add('setoption name Skill Level value 20');
       pre.add('setoption name UCI_Elo value $elo');
@@ -322,6 +325,7 @@ class EngineService {
     final post = const [
       'setoption name UCI_LimitStrength value false',
       'setoption name Skill Level value 20',
+      'setoption name Threads value 1',
     ];
     try {
       final e = await evalOnce(fen, ms, pre: pre, post: post, go: go);

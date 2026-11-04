@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'page_frame.dart';
 import 'package:open_filex/open_filex.dart';
 
 import 'api.dart';
@@ -968,10 +969,7 @@ class _LessonsViewState extends State<LessonsView> {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: ListView(
+    return PageFrame(child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Row(
@@ -1006,8 +1004,6 @@ class _LessonsViewState extends State<LessonsView> {
             ListenableBuilder(listenable: s, builder: (_, __) => _savedCard()),
             _gamesCard(),
           ],
-        ),
-      ),
-    );
+        ));
   }
 }

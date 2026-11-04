@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'page_frame.dart';
 
 import 'api.dart';
 import 'l10n.dart';
@@ -299,20 +300,12 @@ class _RatingViewState extends State<RatingView> {
   @override
   Widget build(BuildContext context) {
     if (_lazy && !_loading && _error == null) {
-      return Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: ListView(
+      return PageFrame(child: ListView(
             padding: const EdgeInsets.all(16),
             children: [_boardSwitch(), _lazyBody()],
-          ),
-        ),
-      );
+          ));
     }
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: ListView(
+    return PageFrame(child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             _boardSwitch(),
@@ -393,9 +386,7 @@ class _RatingViewState extends State<RatingView> {
                 ),
             ],
           ],
-        ),
-      ),
-    );
+        ));
   }
 
   Widget _big(String value, String label) => Expanded(
@@ -789,10 +780,7 @@ class _StatsViewState extends State<StatsView> {
           for (final d in days)
             (s.planDone[AppSettings.dayKey(d)] ?? const <int>[]).length,
         ];
-        return Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: ListView(
+        return PageFrame(child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _card(
@@ -873,9 +861,7 @@ class _StatsViewState extends State<StatsView> {
                   _studentsCard(),
                 ],
               ],
-            ),
-          ),
-        );
+            ));
       },
     );
   }
@@ -1125,12 +1111,7 @@ class _StudentStatsPageState extends State<StudentStatsPage> {
         backgroundColor: pal.bg1,
         foregroundColor: pal.text,
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: body,
-        ),
-      ),
+      body: PageFrame(child: body),
     );
   }
 }

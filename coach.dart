@@ -181,6 +181,9 @@ class _PlanBlockEdit {
   final minutes = TextEditingController();
   final puzzles = <int>{};
   int? materialId;
+  int? openFrom; // ochilish vaqti (ms)
+  int? openUntil; // yopilish vaqti (ms)
+  bool lockOutside = true;
   int kind = 1;
   int level = 0;
   int count = 10;
@@ -194,6 +197,9 @@ class _PlanBlockEdit {
       ..clear()
       ..addAll(((m?['puzzleIds'] as List?) ?? const []).map((e) => (e as num).toInt()));
     materialId = (m?['materialId'] as num?)?.toInt();
+    openFrom = (m?['openFrom'] as num?)?.toInt();
+    openUntil = (m?['openUntil'] as num?)?.toInt();
+    lockOutside = (m?['lockOutside'] as bool?) ?? true;
   }
 
   void clear() => load(null);
@@ -211,6 +217,9 @@ class _PlanBlockEdit {
         'minutes': int.tryParse(minutes.text.trim()),
         'puzzleIds': puzzles.toList()..sort(),
         'materialId': materialId,
+        'openFrom': openFrom,
+        'openUntil': openUntil,
+        'lockOutside': lockOutside,
       };
 }
 
@@ -335,7 +344,60 @@ Future<void> showPlanEditor(
                     hintText: '${defaultMin[i]}',
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                Text(
+                  t('pl_window'),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final v = await pickDateTimeMs(ctx, b.openFrom);
+                        if (v != null) setState(() => b.openFrom = v);
+                      },
+                      icon: const Icon(Icons.play_circle_outline, size: 18),
+                      label: Text(b.openFrom == null
+                          ? t('pl_open_from')
+                          : '${t('pl_open_from')}: ${fmtDateTimeMs(b.openFrom!)}'),
+                    ),
+                    if (b.openFrom != null)
+                      IconButton(
+                        onPressed: () => setState(() => b.openFrom = null),
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final v = await pickDateTimeMs(ctx, b.openUntil);
+                        if (v != null) setState(() => b.openUntil = v);
+                      },
+                      icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                      label: Text(b.openUntil == null
+                          ? t('pl_open_until')
+                          : '${t('pl_open_until')}: ${fmtDateTimeMs(b.openUntil!)}'),
+                    ),
+                    if (b.openUntil != null)
+                      IconButton(
+                        onPressed: () => setState(() => b.openUntil = null),
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                  ],
+                ),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: b.lockOutside,
+                  onChanged: (v) => setState(() => b.lockOutside = v),
+                  title: Text(t('pl_lock'),
+                      style: TextStyle(color: pal.text, fontSize: 13.5)),
+                  subtitle: Text(t('pl_lock_hint'),
+                      style: TextStyle(color: pal.subtext, fontSize: 12)),
+                ),
+                const SizedBox(height: 6),
                 Text(
                   t('co_pick_puzzles'),
                   style: TextStyle(fontWeight: FontWeight.w700, color: pal.text),
@@ -573,6 +635,8 @@ class _CoachCalendarCardState extends State<CoachCalendarCard> {
   List<Map<String, dynamic>> _students = [];
   bool _loading = true;
   String? _error;
+  int? _sel; // ko'rsatilayotgan o'quvchi
+  List<Map<String, dynamic>?> _blocks = List.filled(4, null);
 
   AppSettings get s => widget.settings;
   Pal get pal => widget.pal;
@@ -597,7 +661,12 @@ class _CoachCalendarCardState extends State<CoachCalendarCard> {
       setState(() {
         _students = (st['students'] as List).cast<Map<String, dynamic>>();
         _loading = false;
+        final ids = _students.map((x) => (x['id'] as num).toInt()).toList();
+        if (_sel == null || !ids.contains(_sel)) {
+          _sel = ids.isEmpty ? null : ids.first;
+        }
       });
+      await _loadPreview();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -605,6 +674,89 @@ class _CoachCalendarCardState extends State<CoachCalendarCard> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _loadPreview() async {
+    final token = s.token;
+    final id = _sel;
+    if (token == null || id == null) return;
+    try {
+      final res = await Api.get('/coach/plan/$id', token);
+      final out = List<Map<String, dynamic>?>.filled(4, null);
+      for (final b in (res['blocks'] as List).cast<Map<String, dynamic>>()) {
+        final i = (b['idx'] as num).toInt();
+        if (i >= 0 && i < 4) out[i] = b;
+      }
+      if (mounted) setState(() => _blocks = out);
+    } catch (_) {}
+  }
+
+  Widget _previewBlock(int i) {
+    final b = _blocks[i];
+    final title = ((b?['title'] as String?) ?? '').trim();
+    final mins = (b?['minutes'] as num?)?.toInt();
+    final pz = ((b?['puzzleIds'] as List?) ?? const []).length;
+    final mat = (b?['materialTitle'] as String?) ?? '';
+    final from = (b?['openFrom'] as num?)?.toInt();
+    final until = (b?['openUntil'] as num?)?.toInt();
+    const defMin = [15, 20, 20, 25];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: pal.cardBorder),
+        color: pal.bg1.withAlpha(0x66),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: pal.accent.withAlpha(0x26),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '${mins ?? defMin[i]} ${t('minutes_short')}',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: pal.accent),
+                ),
+              ),
+              const Spacer(),
+              if (from != null || until != null)
+                Icon(Icons.schedule, size: 18, color: pal.subtext),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${i + 1}. ${title.isEmpty ? t('plan_b${i + 1}') : title}',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: pal.text),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            [
+              if (pz > 0) t('pz_selected', {'n': '$pz'}),
+              if (mat.isNotEmpty) mat,
+              if (from != null) fmtDateTimeMs(from),
+              if (until != null) '→ ${fmtDateTimeMs(until)}',
+            ].join('\n').trim().isEmpty
+                ? t('plan_b${i + 1}d')
+                : [
+                    if (pz > 0) t('pz_selected', {'n': '$pz'}),
+                    if (mat.isNotEmpty) mat,
+                    if (from != null) fmtDateTimeMs(from),
+                    if (until != null) '→ ${fmtDateTimeMs(until)}',
+                  ].join('\n'),
+            style: TextStyle(fontSize: 12.5, color: pal.subtext),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -647,11 +799,61 @@ class _CoachCalendarCardState extends State<CoachCalendarCard> {
           else if (_students.isEmpty)
             Text(t('co_no_students'), style: TextStyle(color: pal.subtext))
           else ...[
-            FilledButton.icon(
-              onPressed: () => showPlanEditor(context, s, pal, _students),
-              icon: const Icon(Icons.groups_outlined),
-              label: Text(t('plc_all')),
+            DropdownButtonFormField<int>(
+              value: _sel,
+              isExpanded: true,
+              decoration: InputDecoration(labelText: t('plc_preview_for')),
+              items: [
+                for (final st in _students)
+                  DropdownMenuItem(
+                    value: (st['id'] as num).toInt(),
+                    child: Text(st['name'] as String,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) {
+                setState(() => _sel = v);
+                _loadPreview();
+              },
             ),
+            const SizedBox(height: 10),
+            LayoutBuilder(builder: (context, box) {
+              final two = box.maxWidth >= 520;
+              final w = two ? (box.maxWidth - 10) / 2 : box.maxWidth;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    SizedBox(width: w, child: _previewBlock(i)),
+                ],
+              );
+            }),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: () async {
+                    await showPlanEditor(context, s, pal, _students,
+                        preselect: _sel);
+                    _loadPreview();
+                  },
+                  icon: const Icon(Icons.edit_calendar),
+                  label: Text(t('plc_edit_sel')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await showPlanEditor(context, s, pal, _students);
+                    _loadPreview();
+                  },
+                  icon: const Icon(Icons.groups_outlined),
+                  label: Text(t('plc_all')),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
             for (final st in _students)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -1790,4 +1992,33 @@ Widget customPuzzlePicker({
       ],
     ),
   );
+}
+
+
+/// Sana va vaqtni ketma-ket tanlash (millisekund qaytaradi).
+Future<int?> pickDateTimeMs(BuildContext context, int? initial) async {
+  final now = DateTime.now();
+  final base = initial == null
+      ? now
+      : DateTime.fromMillisecondsSinceEpoch(initial);
+  final d = await showDatePicker(
+    context: context,
+    initialDate: base,
+    firstDate: now.subtract(const Duration(days: 30)),
+    lastDate: now.add(const Duration(days: 730)),
+  );
+  if (d == null || !context.mounted) return null;
+  final tm = await showTimePicker(
+    context: context,
+    initialTime: TimeOfDay.fromDateTime(base),
+  );
+  if (tm == null) return null;
+  return DateTime(d.year, d.month, d.day, tm.hour, tm.minute)
+      .millisecondsSinceEpoch;
+}
+
+String fmtDateTimeMs(int ms) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ms);
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(d.day)}.${two(d.month)}.${d.year} ${two(d.hour)}:${two(d.minute)}';
 }
