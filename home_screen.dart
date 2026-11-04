@@ -126,7 +126,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted && r is int) setState(() => _rating = r);
         final srvFirst = (user['firstName'] as String?) ?? '';
         final srvLast = (user['lastName'] as String?) ?? '';
-        if (srvFirst.isEmpty && srvLast.isEmpty && s.fullName.isNotEmpty) {
+        final srvBirth = (user['birthDate'] as String?) ?? '';
+        if ((srvFirst.isEmpty && srvLast.isEmpty && s.fullName.isNotEmpty) ||
+            (srvBirth.isEmpty && (s.birthDate ?? '').isNotEmpty)) {
           // Serverda ism hali yo'q: ro'yxatdan o'tishda kiritilganni yuboramiz.
           try {
             await Api.post('/me/name', token, {
@@ -137,6 +139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           } catch (_) {}
         }
         await s.applyServerUser(user.cast<String, dynamic>());
+        loadCustomPuzzles(s);
         try {
           final pr = await Api.get('/me/progress', token);
           await s.mergeSolved((pr['solved'] as Map).cast<String, dynamic>());
@@ -1465,6 +1468,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final mm = picked.month.toString().padLeft(2, '0');
     final dd = picked.day.toString().padLeft(2, '0');
     await s.setBirthDate('${picked.year}-$mm-$dd');
+    await _pushProfile(); // darhol serverga saqlaymiz
+  }
+
+  Future<void> _pushProfile() async {
+    final token = s.token;
+    if (token == null) return;
+    try {
+      await Api.post('/me/name', token, {
+        'firstName': s.firstName,
+        'lastName': s.lastName,
+        'birthDate': s.birthDate ?? '',
+      });
+    } catch (_) {}
   }
 
   Future<void> _saveProfile() async {
@@ -2046,6 +2062,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           try {
             await syncProgress(s).timeout(const Duration(seconds: 6));
           } catch (_) {}
+          await _pushProfile();
           await s.signOut();
         },
         scale: scale,

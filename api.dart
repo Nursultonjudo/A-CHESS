@@ -4,12 +4,18 @@ import 'config.dart';
 
 /// Server qaytargan xato. [code] l10n dagi `err_<code>` kaliti bilan mos.
 class ApiException implements Exception {
-  ApiException(this.code);
+  ApiException(this.code, [this.extra]);
   final String code;
+
+  /// Server qo'shimcha ma'lumot yuborsa (masalan, Telegram bot nomi).
+  final String? extra;
   String get l10nKey => 'err_$code';
 }
 
 class Api {
+  /// Oxirgi kod qaysi kanal orqali yuborilgani: 'telegram' yoki 'sms'.
+  static String? lastChannel;
+  static String? lastBot;
   static const _timeout = Duration(seconds: 15);
 
   static Future<Map<String, dynamic>> _send(
@@ -43,7 +49,10 @@ class Api {
           ? <String, dynamic>{}
           : jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode >= 400) {
-        throw ApiException((data['error'] as String?) ?? 'network');
+        throw ApiException(
+          (data['error'] as String?) ?? 'network',
+          data['bot']?.toString(),
+        );
       }
       return data;
     } on ApiException {
@@ -71,6 +80,8 @@ class Api {
   /// Telefonga kod yuboradi. Test rejimida serverdan kod ham qaytadi.
   static Future<String?> requestCode(String phone) async {
     final data = await _send('POST', '/auth/request-code', body: {'phone': phone});
+    lastChannel = data['channel'] as String?;
+    lastBot = data['bot']?.toString();
     return data['devCode'] as String?;
   }
 

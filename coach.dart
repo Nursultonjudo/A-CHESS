@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'l10n.dart';
+import 'puzzle_maker.dart';
 import 'puzzles.dart';
 import 'settings.dart';
 import 'widgets/chess_board.dart';
@@ -380,9 +381,9 @@ Future<void> showPlanEditor(
                     FilledButton.icon(
                       onPressed: () => setState(() {
                         final pool = [
-                          for (final p in kPuzzles)
+                          for (final p in allPuzzles())
                             if (p.kind == b.kind &&
-                                (b.level == 0 || p.level == b.level))
+                                (b.kind == 7 || b.level == 0 || p.level == b.level))
                               p.id,
                         ]..shuffle();
                         b.puzzles
@@ -399,6 +400,21 @@ Future<void> showPlanEditor(
                       ),
                   ],
                 ),
+                if (b.kind == 7)
+                  customPuzzlePicker(
+                    context: ctx,
+                    s: s,
+                    pal: pal,
+                    isPicked: b.puzzles.contains,
+                    toggle: (id) => setState(() {
+                      b.puzzles.contains(id)
+                          ? b.puzzles.remove(id)
+                          : b.puzzles.add(id);
+                    }),
+                    added: (id) => setState(() {
+                      if (!b.puzzles.contains(id)) b.puzzles.add(id);
+                    }),
+                  ),
                 const SizedBox(height: 4),
                 Text(
                   t('pz_selected', {'n': '${b.puzzles.length}'}),
@@ -846,21 +862,14 @@ class _StudentTasksState extends State<_StudentTasks> {
     Puzzle? target;
     for (final id in ids) {
       if (!s.solved.containsKey('$id')) {
-        for (final p in kPuzzles) {
-          if (p.id == id) {
-            target = p;
-            break;
-          }
-        }
+        target = puzzleById(id);
       }
       if (target != null) break;
     }
     if (target == null) {
-      for (final p in kPuzzles) {
-        if (ids.contains(p.id)) {
-          target = p;
-          break;
-        }
+      for (final id in ids) {
+        target = puzzleById(id);
+        if (target != null) break;
       }
     }
     if (target == null) return;
@@ -1349,9 +1358,9 @@ class _CoachPanelState extends State<_CoachPanel> {
                           FilledButton.icon(
                             onPressed: () => setState(() {
                               final pool = [
-                                for (final p in kPuzzles)
+                                for (final p in allPuzzles())
                                   if (p.kind == pKind &&
-                                      (pLevel == 0 || p.level == pLevel))
+                                      (pKind == 7 || pLevel == 0 || p.level == pLevel))
                                     p.id,
                               ]..shuffle();
                               picked
@@ -1363,6 +1372,19 @@ class _CoachPanelState extends State<_CoachPanel> {
                           ),
                         ],
                       ),
+                      if (pKind == 7)
+                        customPuzzlePicker(
+                          context: ctx,
+                          s: s,
+                          pal: pal,
+                          isPicked: picked.contains,
+                          toggle: (id) => setState(() {
+                            picked.contains(id)
+                                ? picked.remove(id)
+                                : picked.add(id);
+                          }),
+                          added: (id) => setState(() => picked.add(id)),
+                        ),
                       const SizedBox(height: 6),
                       Text(
                         t('pz_selected', {'n': '${picked.length}'}),
@@ -1725,4 +1747,47 @@ class _CoachPanelState extends State<_CoachPanel> {
       ),
     );
   }
+}
+
+
+/// Trener boshqotirmalarini tanlash va yangisini yaratish (kind = 7).
+Widget customPuzzlePicker({
+  required BuildContext context,
+  required AppSettings s,
+  required Pal pal,
+  required bool Function(int) isPicked,
+  required void Function(int) toggle,
+  required void Function(int) added,
+}) {
+  final t = (String k) => tr(s.lang, k);
+  return ValueListenableBuilder<int>(
+    valueListenable: customPuzzlesRev,
+    builder: (ctx, _, __) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilledButton.icon(
+              onPressed: () async {
+                final id = await showPuzzleMaker(context, s, pal);
+                if (id != null) added(id);
+              },
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(t('pm_create_btn')),
+            ),
+            for (final p in kCustomPuzzles)
+              FilterChip(
+                label: Text('#${shownNo(p)}'),
+                selected: isPicked(p.id),
+                onSelected: (_) => toggle(p.id),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
 }

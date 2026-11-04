@@ -55,7 +55,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (_) => OtpScreen(settings: s, phone: phone, devCode: devCode),
       ));
     } on ApiException catch (e) {
-      setState(() => _error = t(e.l10nKey));
+      setState(() => _error = (e.extra != null && e.extra!.isNotEmpty)
+          ? '${t(e.l10nKey)} @${e.extra}'
+          : t(e.l10nKey));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

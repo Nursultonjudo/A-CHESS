@@ -3,10 +3,12 @@ import 'dart:math' as math;
 import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
 
+import 'api.dart';
 import 'coach.dart';
 import 'lessons.dart';
 import 'l10n.dart';
 import 'puzzle_data.dart';
+import 'puzzle_maker.dart';
 import 'settings.dart';
 import 'sound.dart';
 import 'widgets/chess_board.dart';
@@ -30,7 +32,57 @@ class Puzzle {
 const List<Puzzle> kPuzzles = [...kBasePuzzles, ...kGenPuzzles];
 
 /// Masala turi nomi: 1-3 mat, 4 dona yutish, 5 himoya, 6 donani qutqarish.
-const List<int> kKinds = [1, 2, 3, 4, 5, 6];
+const List<int> kKinds = [1, 2, 3, 4, 5, 6, 7];
+
+/// Trener yaratgan boshqotirmalar (serverdan olinadi). kind = 7.
+const int kCustomBase = 1000000;
+final List<Puzzle> kCustomPuzzles = [];
+final ValueNotifier<int> customPuzzlesRev = ValueNotifier<int>(0);
+
+List<Puzzle> allPuzzles() => [...kPuzzles, ...kCustomPuzzles];
+
+Puzzle? puzzleById(int id) {
+  for (final p in kCustomPuzzles) {
+    if (p.id == id) return p;
+  }
+  for (final p in kPuzzles) {
+    if (p.id == id) return p;
+  }
+  return null;
+}
+
+int shownNo(Puzzle p) {
+  if (p.kind == 7) {
+    final i = kCustomPuzzles.indexWhere((x) => x.id == p.id);
+    return i < 0 ? 0 : i + 1;
+  }
+  return kShownNo[p.id] ?? 0;
+}
+
+/// Serverdan trener boshqotirmalarini yuklaydi (xato bo'lsa jim o'tadi).
+Future<void> loadCustomPuzzles(AppSettings s) async {
+  final token = s.token;
+  if (token == null) return;
+  try {
+    final res = await Api.get('/puzzles/custom', token);
+    final list = <Puzzle>[];
+    for (final x in (res['puzzles'] as List? ?? const [])) {
+      final m = Map<String, dynamic>.from(x as Map);
+      list.add(Puzzle(
+        (m['id'] as num).toInt(),
+        7,
+        m['fen'] as String,
+        {for (final mv in (m['solutions'] as List)) '$mv': ''},
+        0,
+        1,
+      ));
+    }
+    kCustomPuzzles
+      ..clear()
+      ..addAll(list);
+    customPuzzlesRev.value++;
+  } catch (_) {}
+}
 String kindLabel(String lang, int kind) =>
     tr(lang, kind <= 3 ? 'mate_in_$kind' : 'kind_$kind');
 
@@ -149,11 +201,14 @@ class TasksView extends StatelessWidget {
         final done = kPuzzles.where((p) => settings.solved.containsKey('${p.id}')).length;
         final percent = total == 0 ? 0.0 : done / total;
 
-        return Center(
+        return LayoutBuilder(builder: (context, box) {
+          final wide = box.maxWidth >= 900;
+          return Align(
+          alignment: Alignment.topLeft,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(wide ? 40 : 16, 16, 16, 16),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
+              constraints: BoxConstraints(maxWidth: wide ? 1040 : 720),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -254,7 +309,8 @@ class TasksView extends StatelessWidget {
               ),
             ),
           ),
-        );
+          );
+        });
       },
     );
   }
@@ -306,11 +362,10 @@ class DailyPlanCard extends StatelessWidget {
   Puzzle? _firstOfIds(List<int> ids) {
     Puzzle? any;
     for (final id in ids) {
-      for (final p in kPuzzles) {
-        if (p.id == id) {
-          any ??= p;
-          if (!settings.solved.containsKey('${p.id}')) return p;
-        }
+      final p = puzzleById(id);
+      if (p != null) {
+        any ??= p;
+        if (!settings.solved.containsKey('${p.id}')) return p;
       }
     }
     return any;
@@ -596,12 +651,29 @@ class _PuzzleBrowserState extends State<PuzzleBrowser> {
   int _page = 0;
   static const int _per = 60;
 
+  @override
+  void initState() {
+    super.initState();
+    loadCustomPuzzles(widget.settings);
+    customPuzzlesRev.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    customPuzzlesRev.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
   AppSettings get s => widget.settings;
   Pal get pal => widget.pal;
   String t(String k, [Map<String, String> a = const {}]) => tr(s.lang, k, a);
 
   List<Puzzle> get _list => [
-        for (final p in kPuzzles)
+        for (final p in allPuzzles())
           if (p.kind == _kind &&
               (_level == 0 || p.level == _level) &&
               (_theme < 0 || p.theme == _theme))
@@ -610,7 +682,7 @@ class _PuzzleBrowserState extends State<PuzzleBrowser> {
 
   List<int> get _themes {
     final set = <int>{
-      for (final p in kPuzzles)
+      for (final p in allPuzzles())
         if (p.kind == _kind) p.theme,
     };
     return set.toList()..sort();
@@ -641,7 +713,7 @@ class _PuzzleBrowserState extends State<PuzzleBrowser> {
             ),
             const SizedBox(height: 3),
             Text(
-              '${kShownNo[p.id]}',
+              '${shownNo(p)}',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 13.5,
@@ -718,6 +790,26 @@ class _PuzzleBrowserState extends State<PuzzleBrowser> {
                   ),
                 ],
               ),
+              if (s.role == 'coach') ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final id = await showPuzzleMaker(context, s, pal);
+                      if (id != null && mounted) {
+                        setState(() {
+                          _kind = 7;
+                          _theme = -1;
+                          _page = 0;
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: Text(t('pm_create_btn')),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               _chips<int>(
                 values: kKinds,
@@ -933,14 +1025,15 @@ class _PuzzlePageState extends State<PuzzlePage> {
 
   /// Shu turdagi keyingi yechilmagan masala (bo'lmasa, keyingisi).
   Puzzle? _nextPuzzle() {
-    final idx = kPuzzles.indexWhere((x) => x.id == _p.id);
+    final all = allPuzzles();
+    final idx = all.indexWhere((x) => x.id == _p.id);
     if (idx < 0) return null;
-    for (var i = idx + 1; i < kPuzzles.length; i++) {
-      final q = kPuzzles[i];
+    for (var i = idx + 1; i < all.length; i++) {
+      final q = all[i];
       if (q.kind == _p.kind && !s.solved.containsKey('${q.id}')) return q;
     }
-    for (var i = idx + 1; i < kPuzzles.length; i++) {
-      if (kPuzzles[i].kind == _p.kind) return kPuzzles[i];
+    for (var i = idx + 1; i < all.length; i++) {
+      if (all[i].kind == _p.kind) return all[i];
     }
     return null;
   }
@@ -956,7 +1049,7 @@ class _PuzzlePageState extends State<PuzzlePage> {
         appBar: AppBar(
           backgroundColor: pal.navTop,
           foregroundColor: pal.navText,
-          title: Text(t('puzzle_n', {'n': '${kShownNo[_p.id]}'})),
+          title: Text(t('puzzle_n', {'n': '${shownNo(_p)}'})),
         ),
         body: DecoratedBox(
           decoration: BoxDecoration(

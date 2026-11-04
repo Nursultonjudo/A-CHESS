@@ -137,6 +137,13 @@ class _OtpScreenState extends State<OtpScreen> {
                               errorText: _error,
                             ),
                           ),
+                          if (Api.lastChannel == 'telegram')
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                  '${t('otp_telegram')}${(Api.lastBot ?? '').isEmpty ? '' : ' @${Api.lastBot}'}',
+                                  textAlign: TextAlign.center),
+                            ),
                           if (_devCode != null)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
