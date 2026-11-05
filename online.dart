@@ -4,6 +4,7 @@ import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'chat.dart';
 import 'game_viewer.dart';
 import 'l10n.dart';
 import 'page_frame.dart';
@@ -43,6 +44,10 @@ class DuelWatcher {
     if (_busy || s.token == null || inGame || inLobby || _dialog) return;
     _busy = true;
     try {
+      try {
+        final u = await Api.get('/chat/unread', s.token!);
+        chatUnread.value = (u['count'] as num?)?.toInt() ?? 0;
+      } catch (_) {}
       final r = await Api.get('/duel/poll', s.token!);
       if (!context.mounted) return;
       final gid = r['gameId']?.toString();
@@ -119,6 +124,81 @@ Future<void> openDuelGame(
 
 // ---------------------------------------------------------------------------
 
+/// Vaqt nazoratini erkin tanlash: daqiqa 1–10, har yurishga qo'shimcha 0–2 soniya (eng ko'pi 10+2).
+class TimeControlPicker extends StatelessWidget {
+  const TimeControlPicker({
+    super.key,
+    required this.pal,
+    required this.lang,
+    required this.minutes,
+    required this.inc,
+    required this.onChanged,
+    this.enabled = true,
+  });
+  final Pal pal;
+  final String lang;
+  final int minutes;
+  final int inc;
+  final bool enabled;
+  final void Function(int minutes, int inc) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    String t(String k) => tr(lang, k);
+    const quick = [(1, 0), (3, 0), (3, 2), (5, 0), (5, 2), (10, 0), (10, 2)];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Text(t('du_time'),
+              style: TextStyle(
+                  fontWeight: FontWeight.w700, color: pal.subtext, fontSize: 13)),
+          const Spacer(),
+          Text('$minutes+$inc',
+              style: TextStyle(
+                  fontWeight: FontWeight.w900, fontSize: 18, color: pal.accent)),
+        ]),
+        Row(children: [
+          SizedBox(width: 92, child: Text('${t('tc_minutes')}: $minutes', style: TextStyle(color: pal.text, fontSize: 13))),
+          Expanded(
+            child: Slider(
+              value: minutes.toDouble(),
+              min: 1,
+              max: 10,
+              divisions: 9,
+              label: '$minutes',
+              onChanged: enabled ? (v) => onChanged(v.round(), inc) : null,
+            ),
+          ),
+        ]),
+        Row(children: [
+          SizedBox(width: 92, child: Text('${t('tc_inc')}: +$inc', style: TextStyle(color: pal.text, fontSize: 13))),
+          Expanded(
+            child: Slider(
+              value: inc.toDouble(),
+              min: 0,
+              max: 2,
+              divisions: 2,
+              label: '+$inc',
+              onChanged: enabled ? (v) => onChanged(minutes, v.round()) : null,
+            ),
+          ),
+        ]),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          for (final q in quick)
+            ChoiceChip(
+              label: Text('${q.$1}+${q.$2}'),
+              selected: minutes == q.$1 && inc == q.$2,
+              selectedColor: pal.accent.withAlpha(0x55),
+              onSelected: enabled ? (_) => onChanged(q.$1, q.$2) : null,
+            ),
+        ]),
+        Text(t('tc_max'), style: TextStyle(fontSize: 11.5, color: pal.subtext)),
+      ],
+    );
+  }
+}
+
 class DuelLobbyPage extends StatefulWidget {
   const DuelLobbyPage(
       {super.key, required this.settings, required this.pal, this.presetId});
@@ -135,8 +215,8 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
   String t(String k, [Map<String, String> a = const {}]) => tr(s.lang, k, a);
 
   final _idCtl = TextEditingController();
-  static const _presets = [(1, 0), (3, 0), (3, 2), (5, 0), (10, 0), (15, 10)];
-  int _sel = 4;
+  int _min = 5;
+  int _incSec = 0;
   String _mode = 'idle'; // idle | invite | queue
   String? _inviteId;
   String? _msg;
@@ -167,7 +247,7 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
   }
 
   Map<String, dynamic> get _time =>
-      {'minutes': _presets[_sel].$1, 'inc': _presets[_sel].$2, 'rated': _rated};
+      {'minutes': _min, 'inc': _incSec, 'rated': _rated};
 
   void _err(Object e) {
     final key = e is ApiException ? e.l10nKey : 'err_network';
@@ -299,21 +379,17 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
                           fontWeight: FontWeight.w800,
                           color: pal.text)),
                   const SizedBox(height: 14),
-                  Text(t('du_time'),
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: pal.subtext,
-                          fontSize: 13)),
-                  const SizedBox(height: 6),
-                  Wrap(spacing: 8, runSpacing: 6, children: [
-                    for (var i = 0; i < _presets.length; i++)
-                      ChoiceChip(
-                        label: Text('${_presets[i].$1}+${_presets[i].$2}'),
-                        selected: _sel == i,
-                        selectedColor: pal.accent.withAlpha(0x55),
-                        onSelected: waiting ? null : (_) => setState(() => _sel = i),
-                      ),
-                  ]),
+                  TimeControlPicker(
+                    pal: pal,
+                    lang: s.lang,
+                    minutes: _min,
+                    inc: _incSec,
+                    enabled: !waiting,
+                    onChanged: (m, i) => setState(() {
+                      _min = m;
+                      _incSec = i;
+                    }),
+                  ),
                   const SizedBox(height: 14),
                   SegmentedButton<bool>(
                     segments: [
@@ -439,6 +515,7 @@ class _OnlineGamePageState extends State<OnlineGamePage> {
   bool get _myTurn =>
       _v != null &&
       !_over &&
+      _v!['pending'] != true &&
       (_game.turn == ch.Color.WHITE) == _iWhite;
 
   @override
@@ -879,7 +956,9 @@ class _OnlineGamePageState extends State<OnlineGamePage> {
                       ]),
                       const SizedBox(height: 8),
                       Text(
-                        _myTurn ? t('du_my_turn') : t('du_opp_turn'),
+                        v['pending'] == true
+                            ? t('du_wait_start')
+                            : (_myTurn ? t('du_my_turn') : t('du_opp_turn')),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: pal.subtext, fontSize: 12.5),
                       ),

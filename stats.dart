@@ -48,6 +48,7 @@ class RatingView extends StatefulWidget {
 
 class _RatingViewState extends State<RatingView> {
   bool _lazy = false; // false: yetakchilar, true: dangasalar doskasi
+  String _kind = 'games'; // 'games' — partiyalar reytingi, 'puzzle' — masalalar reytingi
   List<Map<String, dynamic>> _lazyItems = [];
   Map<String, dynamic>? _lazyMe;
   int _lazyTotal = 0;
@@ -78,7 +79,7 @@ class _RatingViewState extends State<RatingView> {
       try {
         await syncProgress(s);
       } catch (_) {}
-      final res = await Api.get('/leaderboard', token);
+      final res = await Api.get('/leaderboard?type=$_kind', token);
       final lz = await Api.get('/leaderboard/lazy', token);
       if (!mounted) return;
       setState(() {
@@ -309,6 +310,29 @@ class _RatingViewState extends State<RatingView> {
           padding: const EdgeInsets.all(16),
           children: [
             _boardSwitch(),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Wrap(spacing: 8, children: [
+                ChoiceChip(
+                  label: Text(t('rt_games')),
+                  selected: _kind == 'games',
+                  selectedColor: pal.accent.withAlpha(0x55),
+                  onSelected: (_) {
+                    setState(() => _kind = 'games');
+                    _load();
+                  },
+                ),
+                ChoiceChip(
+                  label: Text(t('rt_puzzles')),
+                  selected: _kind == 'puzzle',
+                  selectedColor: pal.accent.withAlpha(0x55),
+                  onSelected: (_) {
+                    setState(() => _kind = 'puzzle');
+                    _load();
+                  },
+                ),
+              ]),
+            ),
             _card(
               pal,
               Column(

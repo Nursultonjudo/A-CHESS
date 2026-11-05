@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'chat.dart';
 import 'l10n.dart';
 import 'online.dart';
 import 'page_frame.dart';
@@ -412,6 +413,13 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             presetId: '${u['publicId']}'),
                         icon: const Icon(Icons.sports_martial_arts),
                         label: Text(t('du_challenge')),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => openChatWith(context, s, pal,
+                            userId: (u['id'] as num).toInt(), name: name),
+                        icon: const Icon(Icons.chat_bubble_outline),
+                        label: Text(t('ch_write')),
                       ),
                     ],
                   ),
