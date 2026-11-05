@@ -968,7 +968,9 @@ class _StudentStatsPageState extends State<StudentStatsPage> {
           cats[k as String] = (cats[k] ?? 0) + (v as num).toInt();
         });
       }
-      final passive = cats['passive'] ?? 0;
+      final passive = (cats['passive'] ?? 0) +
+          (cats['rating'] ?? 0) +
+          (cats['stats'] ?? 0);
       final catSum = cats.values.fold<int>(0, (a, b) => a + b);
       final shownTotal = catSum > total ? catSum : total;
       final maxSec = sel.fold<int>(
@@ -1040,7 +1042,7 @@ class _StudentStatsPageState extends State<StudentStatsPage> {
                         child: LinearProgressIndicator(
                           value: shownTotal <= 0
                               ? 0
-                              : (cats[c] ?? 0) / shownTotal,
+                              : (c == 'passive' ? passive : (cats[c] ?? 0)) / shownTotal,
                           minHeight: 8,
                           backgroundColor: pal.cardBorder,
                           color: c == 'passive' ? pal.subtext : pal.accent,
@@ -1049,7 +1051,7 @@ class _StudentStatsPageState extends State<StudentStatsPage> {
                     ),
                     SizedBox(
                       width: 92,
-                      child: Text(_fmt(cats[c] ?? 0),
+                      child: Text(_fmt(c == 'passive' ? passive : (cats[c] ?? 0)),
                           textAlign: TextAlign.right,
                           style: TextStyle(
                               fontWeight: FontWeight.w800, color: pal.text)),

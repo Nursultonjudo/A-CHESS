@@ -4,7 +4,8 @@ import 'dart:typed_data';
 import 'dart:ui' show FontFeature;
 
 import 'package:chess/chess.dart' as ch;
-import 'package:flutter/gestures.dart' show EagerGestureRecognizer;
+import 'package:flutter/gestures.dart'
+    show EagerGestureRecognizer, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -797,7 +798,17 @@ class ChessBoard extends StatefulWidget {
     this.lastTo,
     this.enabled = true,
     this.flipped = false,
+    this.premoveColor,
+    this.premoveFrom,
+    this.premoveTo,
+    this.onPremove,
   });
+
+  /// Premove: raqib yurayotganda keyingi yurishni oldindan belgilash.
+  final ch.Color? premoveColor;
+  final String? premoveFrom;
+  final String? premoveTo;
+  final void Function(String? from, String? to)? onPremove;
 
   final bool flipped;
   final ch.Chess game;
@@ -848,8 +859,34 @@ class _ChessBoardState extends State<ChessBoard> {
     return _square(row, col);
   }
 
+  bool get _premoveMode =>
+      !widget.enabled &&
+      widget.premoveColor != null &&
+      widget.onPremove != null &&
+      widget.game.turn != widget.premoveColor;
+
+  ch.Color get _ownColor =>
+      _premoveMode ? widget.premoveColor! : widget.game.turn;
+
+  List _movesFrom(String sq) {
+    if (_premoveMode) {
+      // Premove: navbat bizda bo'lganda mumkin bo'ladigan yurishlar (taxminiy)
+      final parts = widget.game.fen.split(' ');
+      if (parts.length < 4) return const [];
+      parts[1] = widget.premoveColor == ch.Color.WHITE ? 'w' : 'b';
+      parts[3] = '-';
+      try {
+        final g = ch.Chess.fromFEN(parts.join(' '));
+        return g.moves({'verbose': true, 'square': sq}) as List;
+      } catch (_) {
+        return const [];
+      }
+    }
+    return widget.game.moves({'verbose': true, 'square': sq}) as List;
+  }
+
   void _select(String sq) {
-    final moves = widget.game.moves({'verbose': true, 'square': sq}) as List;
+    final moves = _movesFrom(sq);
     final list = [
       for (final m in moves) Map<String, dynamic>.from(m as Map),
     ];
@@ -859,7 +896,7 @@ class _ChessBoardState extends State<ChessBoard> {
   }
 
   void _pDown(Offset p, double cell) {
-    if (!widget.enabled) return;
+    if (!widget.enabled && !_premoveMode) return;
     final sq = _sqAt(p, cell);
     if (sq == null) return;
     final game = widget.game;
@@ -870,7 +907,7 @@ class _ChessBoardState extends State<ChessBoard> {
       return;
     }
     final piece = game.get(sq);
-    if (piece != null && piece.color == game.turn) {
+    if (piece != null && piece.color == _ownColor) {
       setState(() {
         _select(sq);
         _dragFrom = sq;
@@ -936,7 +973,7 @@ class _ChessBoardState extends State<ChessBoard> {
   }
 
   void _onTap(String sq) {
-    if (!widget.enabled) return;
+    if (!widget.enabled && !_premoveMode) return;
     final game = widget.game;
     final from = _selected;
 
@@ -946,7 +983,7 @@ class _ChessBoardState extends State<ChessBoard> {
     }
 
     final piece = game.get(sq);
-    if (piece != null && piece.color == game.turn) {
+    if (piece != null && piece.color == _ownColor) {
       setState(() => _select(sq));
     } else {
       setState(_clear);
@@ -955,6 +992,11 @@ class _ChessBoardState extends State<ChessBoard> {
 
   void _doMove(String from, String sq) {
     final game = widget.game;
+    if (_premoveMode) {
+      setState(_clear);
+      widget.onPremove!(from, sq);
+      return;
+    }
     {
       final mover = game.get(from);
       final target = game.get(sq);
@@ -1092,7 +1134,15 @@ class _ChessBoardState extends State<ChessBoard> {
                     },
                     child: Listener(
                       behavior: HitTestBehavior.opaque,
-                      onPointerDown: (e) => _pDown(e.localPosition, cell),
+                      onPointerDown: (e) {
+                        if (e.buttons == kSecondaryMouseButton) {
+                          // O'ng tugma: premove ni bekor qilish
+                          widget.onPremove?.call(null, null);
+                          setState(_clear);
+                          return;
+                        }
+                        _pDown(e.localPosition, cell);
+                      },
                       onPointerMove: (e) => _pMove(e.localPosition, cell),
                       onPointerUp: (e) => _pUp(e.localPosition, cell),
                       onPointerCancel: (_) => _pCancel(),
@@ -1153,6 +1203,7 @@ class _ChessBoardState extends State<ChessBoard> {
     final isLast = sq == widget.lastFrom || sq == widget.lastTo;
     final isSel = sq == _selected;
 
+    final isPremove = sq == widget.premoveFrom || sq == widget.premoveTo;
     final hiddenPiece = _dragActive && sq == _dragFrom;
     final hover = _dragActive && sq == _hoverSq && isTarget;
     return ColoredBox(
@@ -1178,6 +1229,8 @@ class _ChessBoardState extends State<ChessBoard> {
                 ),
               ),
             ),
+          if (isPremove)
+            const ColoredBox(color: Color(0x88E8590C)),
           if (hover)
             DecoratedBox(
               decoration: BoxDecoration(

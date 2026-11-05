@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../page_frame.dart';
 import '../robot_button.dart';
 import '../ai_chat.dart';
@@ -14,6 +15,7 @@ import 'package:http/http.dart' as http;
 
 import '../api.dart';
 import '../coach.dart';
+import '../game_viewer.dart';
 import '../config.dart';
 import '../engine.dart';
 import '../l10n.dart';
@@ -184,11 +186,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // ---- O'yin holati -------------------------------------------------------
 
+  (String, String)? _premove; // oldindan belgilangan yurish (from, to)
+  String? _resigned; // taslim bo'lgan tomon: 'white' | 'black'
   bool _drawAgreed = false; // ikki tomon kelishib durang qildi
   bool _drawBusy = false;
 
   bool get _over =>
-      _game.in_checkmate || _game.in_draw || _timeoutLoser != null || _drawAgreed;
+      _game.in_checkmate ||
+      _game.in_draw ||
+      _timeoutLoser != null ||
+      _drawAgreed ||
+      _resigned != null;
 
   String get _status {
     if (_thinking) return t('pl_thinking');
@@ -199,6 +207,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_game.in_checkmate) {
       final winner = _game.turn == ch.Color.WHITE ? t('black') : t('white');
       return t('checkmate', {'winner': winner});
+    }
+    if (_resigned != null) {
+      return _resigned == 'white' ? t('res_white_resigned') : t('res_black_resigned');
     }
     if (_drawAgreed) return t('draw_agreed');
     if (_game.in_draw) return t('draw');
@@ -265,7 +276,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _thinkId++;
     if (_thinking) setState(() => _thinking = false);
     bool? whiteWon;
-    if (_timeoutLoser != null) {
+    if (_resigned != null) {
+      whiteWon = _resigned == 'black';
+    } else if (_timeoutLoser != null) {
       whiteWon = _timeoutLoser == 'black';
     } else if (_game.in_checkmate) {
       whiteWon = _game.turn == ch.Color.BLACK;
@@ -292,6 +305,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _blackLeft = _baseSeconds;
       _timeoutLoser = null;
       _drawAgreed = false;
+      _resigned = null;
+      _premove = null;
       _thinking = false;
       _endHandled = false;
       _engineFail = false;
@@ -358,6 +373,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Taslim bo'lish (tasdiqlash bilan).
+  Future<void> _resign() async {
+    if (_over || _log.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t('pl_resign')),
+        content: Text(t('pl_resign_ask')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(t('co_cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFD93025)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(t('pl_resign')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted || _over) return;
+    _thinkId++;
+    // Kompyuterga qarshi: foydalanuvchi taslim bo'ladi. Ikki o'yinchi: yurish navbatidagi tomon.
+    final loserWhite = _vsComputer ? _userWhite : _game.turn == ch.Color.WHITE;
+    setState(() {
+      _resigned = loserWhite ? 'white' : 'black';
+      _thinking = false;
+    });
+    _handleEnd();
+    _requestEval();
+  }
+
   void _acceptDraw() {
     _thinkId++;
     setState(() {
@@ -381,6 +430,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ((_game.turn == ch.Color.WHITE) != _userWhite));
       _timeoutLoser = null;
       _drawAgreed = false;
+      _resigned = null;
+      _premove = null;
       _endHandled = false;
       _boardKey++;
     });
@@ -391,6 +442,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ---- Partiyani saqlash -------------------------------------------------
 
   String get _resultText {
+    if (_resigned != null) return _resigned == 'white' ? '0-1' : '1-0';
     if (_timeoutLoser != null) return _timeoutLoser == 'white' ? '0-1' : '1-0';
     if (_game.in_checkmate) {
       return _game.turn == ch.Color.WHITE ? '0-1' : '1-0';
@@ -399,8 +451,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return '*';
   }
 
-  Future<void> _saveGame() async {
-    if (_log.isEmpty || _savedCurrent) return;
+  ({String pgn, String date, String white, String black, String res, int now})
+      _pgnData() {
     final me = s.fullName.isEmpty ? t('you') : s.fullName;
     final opp = _vsComputer ? 'Stockfish' : t('opponent');
     final white = _bottomWhite ? me : opp;
@@ -421,14 +473,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_vsComputer && !_userWhite) 'WhiteElo': '${_effElo(_elo)}',
     };
     final pgn = buildPgn(headers, [for (final r in _log) r.san], res);
+    return (
+      pgn: pgn,
+      date: date,
+      white: white,
+      black: black,
+      res: res,
+      now: now.millisecondsSinceEpoch,
+    );
+  }
+
+  /// Partiya tugagach: yurishlarni birma-bir ko'rib, har birining bahosini ko'rish.
+  void _reviewGame() {
+    if (_log.isEmpty) return;
+    final games = parsePgn(_pgnData().pgn);
+    if (games.isEmpty) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => GameViewerPage(
+        settings: s,
+        pal: pal,
+        game: games.first,
+        autoAnalyze: true,
+      ),
+    ));
+  }
+
+  Future<void> _saveGame() async {
+    if (_log.isEmpty || _savedCurrent) return;
+    final d = _pgnData();
+    final now = DateTime.fromMillisecondsSinceEpoch(d.now);
     await s.addSavedGame({
       'id': now.millisecondsSinceEpoch,
-      'date': date,
-      'white': white,
-      'black': black,
-      'result': res,
+      'date': d.date,
+      'white': d.white,
+      'black': d.black,
+      'result': d.res,
       'moves': _log.length,
-      'pgn': pgn,
+      'pgn': d.pgn,
     });
     if (!mounted) return;
     setState(() => _savedCurrent = true);
@@ -530,6 +611,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _addIncrement(rec.white);
       _thinking = false;
       if (_log.length == 1) _setupOpen = false;
+    });
+    Sfx.instance.playSan(san);
+    _afterMove();
+    _tryPremove();
+  }
+
+  /// Kompyuter yurgandan so'ng oldindan belgilangan yurishni bajaradi (mumkin bo'lsa).
+  void _tryPremove() {
+    final pm = _premove;
+    if (pm == null) return;
+    _premove = null;
+    if (_over || _engineTurn || !mounted) return;
+    final legal = (_game.moves({'verbose': true}) as List).cast<Map>();
+    Map? pick;
+    for (final m in legal) {
+      if (m['from'] == pm.$1 && m['to'] == pm.$2) {
+        if (pick == null || m['promotion']?.toString() == 'q') pick = m;
+      }
+    }
+    if (pick == null) {
+      setState(() {});
+      return;
+    }
+    final mover = _game.get(pm.$1);
+    final target = _game.get(pm.$2);
+    PieceKind? captured = target == null ? null : kindOf(target.type);
+    if (captured == null &&
+        mover != null &&
+        mover.type == ch.PieceType.PAWN &&
+        pm.$1[0] != pm.$2[0]) {
+      captured = PieceKind.pawn;
+    }
+    final san = pick['san']?.toString() ?? '${pm.$1}${pm.$2}';
+    _game.move({'from': pm.$1, 'to': pm.$2, 'promotion': 'q'});
+    final rec = MoveRecord(
+      san: san,
+      from: pm.$1,
+      to: pm.$2,
+      white: mover?.color == ch.Color.WHITE,
+      captured: captured,
+    );
+    setState(() {
+      _log.add(rec);
+      _addIncrement(rec.white);
+      _boardKey++;
     });
     Sfx.instance.playSan(san);
     _afterMove();
@@ -700,6 +826,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           if (over && _log.isNotEmpty)
             IconButton(
+              tooltip: t('pl_review'),
+              onPressed: _reviewGame,
+              icon: Icon(Icons.analytics_outlined, color: w.accent),
+            ),
+          if (over && _log.isNotEmpty)
+            IconButton(
               tooltip: _savedCurrent ? t('pl_game_saved') : t('pl_save_game'),
               onPressed: _savedCurrent ? null : _saveGame,
               icon: Icon(
@@ -726,9 +858,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final d = _engine.diag.value;
           sub = d.isEmpty ? '—' : d;
         } else {
-          final b = e.bestText;
+          final b = s.bestHint ? e.bestText : null;
           sub = b == null
-              ? '${t('engine_depth')} ${e.depth}'
+              ? (s.bestHint
+                  ? '${t('engine_depth')} ${e.depth}'
+                  : '${t('engine_hint_hidden')}  ·  ${t('engine_depth')} ${e.depth}')
               : '${t('engine_best')}: $b  ·  ${t('engine_depth')} ${e.depth}';
         }
         return Container(
@@ -771,6 +905,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
                   color: w.accent,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Tooltip(
+                message: t('engine_hint_toggle'),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      s.bestHint ? Icons.lightbulb : Icons.lightbulb_outline,
+                      size: 16,
+                      color: w.accent,
+                    ),
+                    Switch(
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: s.bestHint,
+                      onChanged: (v) => s.setBestHint(v),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1068,12 +1221,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ],
         ),
         const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: (_over || _log.length < 2 || _drawBusy || _thinking)
-              ? null
-              : _offerDraw,
-          icon: const Icon(Icons.handshake_outlined, size: 20),
-          label: lab('pl_draw'),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF2B705),
+                  foregroundColor: const Color(0xFF2B2100),
+                  disabledBackgroundColor: const Color(0x55F2B705),
+                ),
+                onPressed: (_over || _log.length < 2 || _drawBusy || _thinking)
+                    ? null
+                    : _offerDraw,
+                icon: const Icon(Icons.handshake_outlined, size: 20),
+                label: lab('pl_draw'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFD93025),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0x55D93025),
+                ),
+                onPressed: (_over || _log.isEmpty) ? null : _resign,
+                icon: const Icon(Icons.flag_outlined, size: 20),
+                label: lab('pl_resign'),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1091,6 +1268,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       enabled: !_over && !_engineTurn,
       flipped: !_bottomWhite,
       onMoved: _onMoved,
+      premoveColor: (_vsComputer && !_over)
+          ? (_userWhite ? ch.Color.WHITE : ch.Color.BLACK)
+          : null,
+      premoveFrom: _premove?.$1,
+      premoveTo: _premove?.$2,
+      onPremove: (f, t2) => setState(
+          () => _premove = (f == null || t2 == null) ? null : (f, t2)),
     );
     return LayoutBuilder(
       builder: (context, c) {
@@ -1680,6 +1864,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                 ],
               ),
+              if (s.publicId.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: pal.accentSoft,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: pal.accent.withAlpha(0x88)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.tag, color: pal.accent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(t('my_id'),
+                                style: TextStyle(
+                                    fontSize: 12, color: pal.subtext)),
+                            SelectableText(
+                              s.publicId,
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 2,
+                                color: pal.text,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: t('copy'),
+                        icon: const Icon(Icons.copy),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: s.publicId));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(t('copied'))));
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               TextField(
                 controller: _firstCtl,

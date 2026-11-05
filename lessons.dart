@@ -806,6 +806,288 @@ class _LessonsViewState extends State<LessonsView> {
 
   // ---- O'yinchining o'zi saqlagan partiyalari -----------------------------
 
+  // ---- Shaxsiy partiyalar: PGN yuklash va tahrirlash ----------------------------
+
+  Future<void> _importPgn() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pgn'],
+        withData: true,
+      );
+      final f = picked?.files.single;
+      if (f == null) return;
+      Uint8List? bytes = f.bytes;
+      if (bytes == null && f.path != null) {
+        bytes = await File(f.path!).readAsBytes();
+      }
+      if (bytes == null) return;
+      final text = utf8.decode(bytes, allowMalformed: true);
+      final games = parsePgn(text);
+      if (games.isEmpty) {
+        _snack(t('ls_pgn_empty'));
+        return;
+      }
+      final base = DateTime.now().millisecondsSinceEpoch;
+      final list = <Map<String, dynamic>>[];
+      for (var i = 0; i < games.length && i < 200; i++) {
+        final g = games[i];
+        list.add({
+          'id': base + i,
+          'date': g.date.isEmpty ? '?' : g.date,
+          'white': g.white,
+          'black': g.black,
+          'result': g.res,
+          'moves': g.sans.length,
+          'pgn': g.toPgn(),
+        });
+      }
+      await s.addSavedGames(list);
+      _snack(t('ls_pgn_added', {'n': '${list.length}'}));
+    } catch (_) {
+      _snack(t('ls_pgn_empty'));
+    }
+  }
+
+  Future<void> _editGame(Map<String, dynamic> g) async {
+    final wc = TextEditingController(text: '${g['white']}');
+    final bc = TextEditingController(text: '${g['black']}');
+    final dc = TextEditingController(text: '${g['date']}');
+    final rc = TextEditingController(text: '${g['result']}');
+    final pc = TextEditingController(text: '${g['pgn']}');
+    String err = '';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: pal.card,
+          title: Text(t('ls_edit')),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                      controller: wc,
+                      decoration: InputDecoration(labelText: t('white'))),
+                  TextField(
+                      controller: bc,
+                      decoration: InputDecoration(labelText: t('black'))),
+                  TextField(
+                      controller: dc,
+                      decoration: InputDecoration(labelText: t('ls_date'))),
+                  TextField(
+                      controller: rc,
+                      decoration: InputDecoration(labelText: t('ls_result'))),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: pc,
+                    minLines: 5,
+                    maxLines: 10,
+                    decoration: const InputDecoration(
+                      labelText: 'PGN',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (err.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(err,
+                          style: const TextStyle(color: Colors.redAccent)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(t('co_cancel')),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (parsePgn(pc.text).isEmpty) {
+                  setSt(() => err = t('ls_pgn_empty'));
+                  return;
+                }
+                Navigator.of(ctx).pop(true);
+              },
+              child: Text(t('save')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      final parsed = parsePgn(pc.text).first;
+      final w = wc.text.trim().isEmpty ? '?' : wc.text.trim();
+      final b = bc.text.trim().isEmpty ? '?' : bc.text.trim();
+      final d = dc.text.trim().isEmpty ? '?' : dc.text.trim();
+      final r = rc.text.trim().isEmpty ? '*' : rc.text.trim();
+      final headers = {
+        ...parsed.headers,
+        'White': w,
+        'Black': b,
+        'Date': d,
+        'Result': r,
+      };
+      await s.updateSavedGame({
+        ...g,
+        'white': w,
+        'black': b,
+        'date': d,
+        'result': r,
+        'moves': parsed.sans.length,
+        'pgn': buildPgn(headers, parsed.sans, r),
+      });
+    }
+    wc.dispose();
+    bc.dispose();
+    dc.dispose();
+    rc.dispose();
+    pc.dispose();
+  }
+
+  // ---- Shaxsiy fayllar: PGN, PDF, DJVU -------------------------------------------
+
+  Future<void> _addMyFile() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pgn', 'pdf', 'djvu', 'djv'],
+      );
+      final f = picked?.files.single;
+      if (f == null || f.path == null) return;
+      final ext = f.name.contains('.') ? f.name.split('.').last.toLowerCase() : '';
+      final base = f.name.contains('.')
+          ? f.name.substring(0, f.name.lastIndexOf('.'))
+          : f.name;
+      await s.addMyFile({
+        'id': DateTime.now().millisecondsSinceEpoch,
+        'name': base,
+        'path': f.path,
+        'kind': ext == 'djv' ? 'djvu' : ext,
+      });
+    } catch (_) {
+      _snack(t('err_network'));
+    }
+  }
+
+  Future<void> _openMyFile(Map<String, dynamic> f) async {
+    final path = '${f['path']}';
+    if (!File(path).existsSync()) {
+      _snack(t('ls_file_missing'));
+      return;
+    }
+    if (f['kind'] == 'pgn') {
+      final text = utf8.decode(await File(path).readAsBytes(), allowMalformed: true);
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PgnDatabasePage(
+          settings: s,
+          pal: pal,
+          initialText: text,
+          initialName: '${f['name']}',
+        ),
+      ));
+    } else {
+      final r = await OpenFilex.open(path);
+      if (r.type != ResultType.done) _snack(t('ls_pdf_fail'));
+    }
+  }
+
+  Future<void> _renameMyFile(Map<String, dynamic> f) async {
+    final c = TextEditingController(text: '${f['name']}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: pal.card,
+        title: Text(t('ls_edit')),
+        content: TextField(controller: c),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(t('co_cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(t('save'))),
+        ],
+      ),
+    );
+    if (ok == true && c.text.trim().isNotEmpty) {
+      await s.renameMyFile((f['id'] as num).toInt(), c.text.trim());
+    }
+    c.dispose();
+  }
+
+  Widget _myFilesCard() {
+    final list = s.myFiles;
+    IconData icon(String k) => k == 'pgn'
+        ? Icons.description_outlined
+        : (k == 'pdf' ? Icons.picture_as_pdf_outlined : Icons.menu_book_outlined);
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.folder_open, color: pal.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  t('ls_my_files'),
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: pal.text,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _addMyFile,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(t('ls_add_file')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            list.isEmpty ? t('ls_no_files') : t('ls_my_files_hint'),
+            style: TextStyle(fontSize: 12.5, color: pal.subtext),
+          ),
+          for (final f in list)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(icon('${f['kind']}'), color: pal.accent),
+              title: Text('${f['name']}',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: pal.text)),
+              subtitle: Text('${f['kind']}'.toUpperCase(),
+                  style: TextStyle(fontSize: 12, color: pal.subtext)),
+              onTap: () => _openMyFile(f),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: t('ls_edit'),
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    onPressed: () => _renameMyFile(f),
+                  ),
+                  IconButton(
+                    tooltip: t('co_delete'),
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    onPressed: () => s.deleteMyFile((f['id'] as num).toInt()),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _savedCard() {
     final list = s.savedGames;
     return _card(
@@ -825,6 +1107,11 @@ class _LessonsViewState extends State<LessonsView> {
                     color: pal.text,
                   ),
                 ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _importPgn,
+                icon: const Icon(Icons.upload_file, size: 18),
+                label: Text(t('ls_pgn_upload')),
               ),
             ],
           ),
@@ -886,6 +1173,12 @@ class _LessonsViewState extends State<LessonsView> {
                             fontWeight: FontWeight.w800,
                             color: pal.accent,
                           ),
+                        ),
+                        IconButton(
+                          tooltip: t('ls_edit'),
+                          onPressed: () => _editGame(g),
+                          icon: Icon(Icons.edit_outlined,
+                              size: 20, color: pal.subtext),
                         ),
                         IconButton(
                           tooltip: t('co_delete'),
@@ -1002,6 +1295,7 @@ class _LessonsViewState extends State<LessonsView> {
             const SizedBox(height: 12),
             _materialsCard(),
             ListenableBuilder(listenable: s, builder: (_, __) => _savedCard()),
+            ListenableBuilder(listenable: s, builder: (_, __) => _myFilesCard()),
             _gamesCard(),
           ],
         ));

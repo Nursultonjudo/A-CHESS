@@ -8,7 +8,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'engine.dart';
 
 /// Yurish sifati belgilari.
-enum MoveQuality { best, good, inaccuracy, mistake, blunder }
+enum MoveQuality { brilliant, best, good, inaccuracy, mistake, blunder }
+
+/// FEN dagi tomon materiali (piyoda=1, ot/fil=3, ladya=5, farzin=9).
+int materialOfFen(String fen, bool white) {
+  const v = {'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9};
+  var sum = 0;
+  for (final c in fen.split(' ').first.split('')) {
+    final low = c.toLowerCase();
+    final val = v[low];
+    if (val == null) continue;
+    final isWhite = c == c.toUpperCase();
+    if (isWhite == white) sum += val;
+  }
+  return sum;
+}
 
 String _fnv(String s) {
   var h = 0x811c9dc5;
@@ -64,12 +78,33 @@ class GameAnalysis {
     return math.max(0, whiteMoved ? before - after : after - before);
   }
 
-  MoveQuality quality(int ply, String playedUci) {
+  /// Brilliant: eng yaxshi (yoki unga yaqin) yurish, material qurbon qilinadi,
+  /// lekin pozitsiya yomonlashmaydi va oldin allaqachon yutuq holatda emas edi.
+  bool _isBrilliant(int ply, List<String> fens) {
+    if (ply + 1 >= fens.length) return false;
+    final white = ply.isOdd;
+    final before = materialOfFen(fens[ply - 1], white) -
+        materialOfFen(fens[ply - 1], !white);
+    final after = materialOfFen(fens[ply + 1], white) -
+        materialOfFen(fens[ply + 1], !white);
+    final moverWinBefore = white ? winPct(ply - 1) : 100 - winPct(ply - 1);
+    final moverWinAfter = white ? winPct(ply) : 100 - winPct(ply);
+    return after - before <= -2 &&
+        loss(ply) < 3 &&
+        moverWinAfter >= 45 &&
+        moverWinBefore < 92;
+  }
+
+  MoveQuality quality(int ply, String playedUci, {List<String>? fens}) {
     final l = loss(ply);
     if (best[ply - 1].isNotEmpty &&
         playedUci.length >= 4 &&
         best[ply - 1].startsWith(playedUci.substring(0, 4))) {
+      if (fens != null && _isBrilliant(ply, fens)) return MoveQuality.brilliant;
       return MoveQuality.best;
+    }
+    if (fens != null && l < 2 && _isBrilliant(ply, fens)) {
+      return MoveQuality.brilliant;
     }
     if (l >= 20) return MoveQuality.blunder;
     if (l >= 10) return MoveQuality.mistake;

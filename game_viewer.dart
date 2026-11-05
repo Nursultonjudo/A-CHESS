@@ -32,7 +32,9 @@ class GameBoardPanel extends StatefulWidget {
     required this.result,
     this.practice = false,
     this.startPly = 0,
+    this.autoAnalyze = false,
   });
+  final bool autoAnalyze; // ochilishi bilan tahlilni o'zi boshlaydi
   final AppSettings settings;
   final Pal pal;
   final List<String> sans;
@@ -106,6 +108,7 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
     } catch (_) {}
     final a = await loadAnalysis(_rr.sans);
     if (a != null && mounted) setState(() => _an = a);
+    if (a == null && widget.autoAnalyze && mounted) _startAnalysis();
   }
 
   void _setPly(int n) {
@@ -205,11 +208,13 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
     if (a == null || ply < 1 || ply > a.plies || ply > _rr.ucis.length) {
       return null;
     }
-    return a.quality(ply, _rr.ucis[ply - 1]);
+    return a.quality(ply, _rr.ucis[ply - 1], fens: _rr.fens);
   }
 
   Color _qColor(MoveQuality q) {
     switch (q) {
+      case MoveQuality.brilliant:
+        return const Color(0xFF14B8D4);
       case MoveQuality.best:
         return const Color(0xFF22C55E);
       case MoveQuality.good:
@@ -225,6 +230,8 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
 
   String _qSuffix(MoveQuality? q) {
     switch (q) {
+      case MoveQuality.brilliant:
+        return '!!';
       case MoveQuality.inaccuracy:
         return '?!';
       case MoveQuality.mistake:
@@ -467,9 +474,7 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
       final cur = _ply == i + 1;
       final hidden = _practice && i >= _ply;
       final q = hidden ? null : _q(i + 1);
-      final qc = q == null || q == MoveQuality.good || q == MoveQuality.best
-          ? null
-          : _qColor(q);
+      final qc = q == null ? null : _qColor(q);
       chips.add(InkWell(
         key: cur ? (_chipKeys[i] ??= GlobalKey()) : null,
         borderRadius: BorderRadius.circular(6),
@@ -485,7 +490,7 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
             hidden ? '···' : '${_rr.sans[i]}${_qSuffix(q)}',
             style: TextStyle(
               fontWeight: cur ? FontWeight.w800 : FontWeight.w600,
-              color: pal.text,
+              color: qc ?? pal.text,
             ),
           ),
         ),
@@ -697,6 +702,8 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
                     style: TextStyle(color: pal.subtext))),
           ],
         ),
+        _countRow(t('an_brilliant'), MoveQuality.brilliant,
+            cnt[MoveQuality.brilliant]![0], cnt[MoveQuality.brilliant]![1]),
         _countRow(t('an_best'), MoveQuality.best, cnt[MoveQuality.best]![0],
             cnt[MoveQuality.best]![1]),
         _countRow(t('an_good'), MoveQuality.good, cnt[MoveQuality.good]![0],
@@ -928,6 +935,7 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
     } else {
       final q = _q(_ply)!;
       final key = {
+        MoveQuality.brilliant: 'an_brilliant',
         MoveQuality.best: 'an_best',
         MoveQuality.good: 'an_good',
         MoveQuality.inaccuracy: 'an_inacc',
@@ -958,7 +966,9 @@ class _GameBoardPanelState extends State<GameBoardPanel> {
         kids.add(Text(t('det_loss', {'l': l.toStringAsFixed(1)}),
             style: TextStyle(color: pal.subtext)));
       }
-      if (q != MoveQuality.best && a.best[_ply - 1].isNotEmpty) {
+      if (q != MoveQuality.best &&
+          q != MoveQuality.brilliant &&
+          a.best[_ply - 1].isNotEmpty) {
         final bs = uciToSan(_rr.fens[_ply - 1], a.best[_ply - 1]);
         if (bs != null) {
           kids.add(const SizedBox(height: 4));
@@ -1018,10 +1028,12 @@ class GameViewerPage extends StatelessWidget {
     required this.settings,
     required this.pal,
     required this.game,
+    this.autoAnalyze = false,
   });
   final AppSettings settings;
   final Pal pal;
   final PgnGame game;
+  final bool autoAnalyze;
 
   @override
   Widget build(BuildContext context) {
@@ -1050,6 +1062,7 @@ class GameViewerPage extends StatelessWidget {
                 sans: g.sans,
                 headers: g.headers,
                 result: g.res,
+                autoAnalyze: autoAnalyze,
               ),
               const SizedBox(height: 20),
             ],

@@ -22,7 +22,9 @@ class AppSettings extends ChangeNotifier {
         uiStyle = _prefs.getInt('uiStyle') ?? 0,
         role = _prefs.getString('role'),
         inviteCode = _prefs.getString('inviteCode'),
+        publicId = _prefs.getString('publicId') ?? '',
         engineOn = _prefs.getBool('engineOn') ?? true,
+        bestHint = _prefs.getBool('bestHint') ?? true,
         coordSize = _prefs.getInt('coordSize') ?? 1,
         coordFont = _prefs.getInt('coordFont') ?? 0,
         birthDate = _prefs.getString('birthDate'),
@@ -40,7 +42,8 @@ class AppSettings extends ChangeNotifier {
         playElo = _clampElo(_prefs.getInt('playElo') ?? 1500),
         playSide = _prefs.getInt('playSide') ?? 0,
         planCfg = _loadPlanCfg(_prefs.getString('planCfg')),
-        savedGames = _loadGames(_prefs.getString('savedGames'));
+        savedGames = _loadGames(_prefs.getString('savedGames')),
+        myFiles = _loadGames(_prefs.getString('myFiles'));
 
   final SharedPreferences _prefs;
 
@@ -55,8 +58,10 @@ class AppSettings extends ChangeNotifier {
   int pieceSet;
   int uiStyle;
   bool engineOn;
+  bool bestHint; // eng yaxshi yurish matni ko'rinsinmi
   String? role; // 'student' | 'coach' | null
   String? inviteCode; // trenerning taklif kodi
+  String publicId; // ochiq ID raqam (duel uchun)
   int coordSize; // 0 kichik, 1 o'rta, 2 katta
   int coordFont; // 0 oddiy, 1 antiqa, 2 texnik
   String? birthDate; // yyyy-MM-dd
@@ -75,6 +80,7 @@ class AppSettings extends ChangeNotifier {
   int playSide; // 0 oq, 1 qora, 2 tasodifiy
   List<Map<String, dynamic>?> planCfg; // trener belgilagan 4 ta blok
   List<Map<String, dynamic>> savedGames; // o'yinchi saqlagan partiyalar
+  List<Map<String, dynamic>> myFiles; // o'yinchining shaxsiy fayllari (PGN, PDF, DJVU)
 
   static Map<String, int> _loadSolved(String? v) {
     if (v == null || v.isEmpty) return {};
@@ -96,8 +102,6 @@ class AppSettings extends ChangeNotifier {
     'task',
     'analysis',
     'lessons',
-    'rating',
-    'stats',
   ];
 
   /// Asosiy oyna tegishli bo'lim (HomeScreen belgilaydi).
@@ -149,6 +153,41 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Bir nechta partiyani birdan qo'shadi (PGN fayldan).
+  Future<void> addSavedGames(List<Map<String, dynamic>> gs) async {
+    savedGames = [...gs, ...savedGames].take(500).toList();
+    await _prefs.setString('savedGames', jsonEncode(savedGames));
+    notifyListeners();
+  }
+
+  Future<void> updateSavedGame(Map<String, dynamic> g) async {
+    savedGames = [
+      for (final x in savedGames) x['id'] == g['id'] ? g : x,
+    ];
+    await _prefs.setString('savedGames', jsonEncode(savedGames));
+    notifyListeners();
+  }
+
+  Future<void> addMyFile(Map<String, dynamic> f) async {
+    myFiles = [f, ...myFiles].take(200).toList();
+    await _prefs.setString('myFiles', jsonEncode(myFiles));
+    notifyListeners();
+  }
+
+  Future<void> renameMyFile(int id, String name) async {
+    myFiles = [
+      for (final x in myFiles) x['id'] == id ? {...x, 'name': name} : x,
+    ];
+    await _prefs.setString('myFiles', jsonEncode(myFiles));
+    notifyListeners();
+  }
+
+  Future<void> deleteMyFile(int id) async {
+    myFiles = myFiles.where((x) => x['id'] != id).toList();
+    await _prefs.setString('myFiles', jsonEncode(myFiles));
+    notifyListeners();
+  }
+
   Future<void> deleteSavedGame(int id) async {
     savedGames = savedGames.where((g) => g['id'] != id).toList();
     await _prefs.setString('savedGames', jsonEncode(savedGames));
@@ -192,7 +231,11 @@ class AppSettings extends ChangeNotifier {
     final out = <String, int>{for (final c in activeCats) c: src[c] ?? 0};
     final known = src.values.fold<int>(0, (a, b) => a + b);
     final total = activity[day] ?? 0;
-    out['passive'] = (src['passive'] ?? 0) + (total > known ? total - known : 0);
+    // Reyting va statistika oynalarida turish ham passiv faollik hisoblanadi.
+    out['passive'] = (src['passive'] ?? 0) +
+        (src['rating'] ?? 0) +
+        (src['stats'] ?? 0) +
+        (total > known ? total - known : 0);
     return out;
   }
 
@@ -420,6 +463,11 @@ class AppSettings extends ChangeNotifier {
   Future<void> applyServerUser(Map<String, dynamic> user) async {
     role = user['role'] as String?;
     inviteCode = user['inviteCode'] as String?;
+    final pid = (user['publicId'] as String?) ?? '';
+    if (pid.isNotEmpty) {
+      publicId = pid;
+      await _prefs.setString('publicId', pid);
+    }
     final fn = (user['firstName'] as String?) ?? '';
     final ln = (user['lastName'] as String?) ?? '';
     if (fn.isNotEmpty || ln.isNotEmpty) {
@@ -449,6 +497,12 @@ class AppSettings extends ChangeNotifier {
   Future<void> setEngineOn(bool v) async {
     engineOn = v;
     await _prefs.setBool('engineOn', v);
+    notifyListeners();
+  }
+
+  Future<void> setBestHint(bool v) async {
+    bestHint = v;
+    await _prefs.setBool('bestHint', v);
     notifyListeners();
   }
 
@@ -521,6 +575,7 @@ class AppSettings extends ChangeNotifier {
     avatar = null;
     role = null;
     inviteCode = null;
+    publicId = '';
     solved = {};
     reviews = {};
     planDone = {};
@@ -528,6 +583,7 @@ class AppSettings extends ChangeNotifier {
     actCat = {};
     planCfg = List<Map<String, dynamic>?>.filled(4, null);
     savedGames = [];
+    myFiles = [];
     for (final k in const [
       'token',
       'phone',
@@ -537,6 +593,7 @@ class AppSettings extends ChangeNotifier {
       'avatar',
       'role',
       'inviteCode',
+      'publicId',
       'solved',
       'reviews',
       'planDone',
@@ -544,6 +601,7 @@ class AppSettings extends ChangeNotifier {
       'actCat',
       'planCfg',
       'savedGames',
+      'myFiles',
     ]) {
       await _prefs.remove(k);
     }
