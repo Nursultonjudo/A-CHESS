@@ -15,9 +15,17 @@ class _Msg {
 
 /// A-CHESS AI bilan suhbat oynasi (o'quvchilar uchun).
 class AiChatView extends StatefulWidget {
-  const AiChatView({super.key, required this.settings, required this.pal});
+  const AiChatView({
+    super.key,
+    required this.settings,
+    required this.pal,
+    this.onOpenStudent,
+  });
   final AppSettings settings;
   final Pal pal;
+
+  /// Trener uchun: javobdagi o'quvchi nomi bosilganda chaqiriladi.
+  final void Function(int id)? onOpenStudent;
 
   @override
   State<AiChatView> createState() => _AiChatViewState();
@@ -87,19 +95,68 @@ class _AiChatViewState extends State<AiChatView> {
     }
   }
 
-  /// **qalin** belgilarini oddiy qalin matnga aylantiradi.
+  static final _link = RegExp(r'\[\[s:(\d+)\|([^\]]*)\]\]');
+
+  /// **qalin** belgilarini qalin matnga, [[s:ID|Ism]] ni bosiladigan havolaga aylantiradi.
   List<InlineSpan> _spans(String text, Color color) {
     final out = <InlineSpan>[];
-    final parts = text.split('**');
-    for (var i = 0; i < parts.length; i++) {
-      out.add(TextSpan(
-        text: parts[i],
-        style: TextStyle(
-          color: color,
-          fontWeight: i.isOdd ? FontWeight.w800 : FontWeight.w400,
-        ),
-      ));
+    void bold(String chunk) {
+      final parts = chunk.split('**');
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].isEmpty) continue;
+        out.add(TextSpan(
+          text: parts[i],
+          style: TextStyle(
+            color: color,
+            fontWeight: i.isOdd ? FontWeight.w800 : FontWeight.w400,
+          ),
+        ));
+      }
     }
+
+    var pos = 0;
+    for (final m in _link.allMatches(text)) {
+      bold(text.substring(pos, m.start));
+      final id = int.parse(m.group(1)!);
+      final name = m.group(2)!;
+      final open = widget.onOpenStudent;
+      if (open == null) {
+        out.add(TextSpan(
+            text: name,
+            style: TextStyle(color: color, fontWeight: FontWeight.w800)));
+      } else {
+        out.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => open(id),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: pal.accent.withAlpha(0x33),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: pal.accent),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person, size: 14, color: pal.accent),
+                    const SizedBox(width: 4),
+                    Text(name,
+                        style: TextStyle(
+                            color: pal.text, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ));
+      }
+      pos = m.end;
+    }
+    bold(text.substring(pos));
     return out;
   }
 
@@ -116,15 +173,22 @@ class _AiChatViewState extends State<AiChatView> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: me ? pal.accent : pal.cardBorder),
         ),
-        child: SelectableText.rich(
-          TextSpan(children: _spans(m.text, pal.text), style: const TextStyle(height: 1.4)),
-        ),
+        child: (widget.onOpenStudent != null && _link.hasMatch(m.text))
+            ? Text.rich(TextSpan(
+                children: _spans(m.text, pal.text),
+                style: const TextStyle(height: 1.4)))
+            : SelectableText.rich(TextSpan(
+                children: _spans(m.text, pal.text),
+                style: const TextStyle(height: 1.4))),
       ),
     );
   }
 
   Widget _welcome() {
-    final tips = [t('ai_tip1'), t('ai_tip2'), t('ai_tip3'), t('ai_tip4')];
+    final coach = widget.onOpenStudent != null;
+    final tips = coach
+        ? [t('ai_ctip1'), t('ai_ctip2'), t('ai_ctip3'), t('ai_ctip4')]
+        : [t('ai_tip1'), t('ai_tip2'), t('ai_tip3'), t('ai_tip4')];
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

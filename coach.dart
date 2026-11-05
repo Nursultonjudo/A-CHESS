@@ -622,6 +622,9 @@ Future<void> showPlanEditor(
 }
 
 /// Trener uchun: "Vazifalar" oynasidagi kunlik kalendar boshqaruvi.
+/// A-CHESS AI chatidan o'quvchi nomi bosilganda shu o'quvchini tanlash uchun.
+final ValueNotifier<int?> coachFocusStudent = ValueNotifier<int?>(null);
+
 class CoachCalendarCard extends StatefulWidget {
   const CoachCalendarCard({super.key, required this.settings, required this.pal});
   final AppSettings settings;
@@ -645,7 +648,24 @@ class _CoachCalendarCardState extends State<CoachCalendarCard> {
   @override
   void initState() {
     super.initState();
+    _sel = coachFocusStudent.value;
+    coachFocusStudent.addListener(_onFocus);
     _load();
+  }
+
+  @override
+  void dispose() {
+    coachFocusStudent.removeListener(_onFocus);
+    super.dispose();
+  }
+
+  void _onFocus() {
+    final id = coachFocusStudent.value;
+    if (id == null || !mounted) return;
+    if (_students.any((x) => (x['id'] as num).toInt() == id)) {
+      setState(() => _sel = id);
+      _loadPreview();
+    }
   }
 
   Future<void> _load() async {

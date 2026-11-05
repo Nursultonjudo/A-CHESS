@@ -8,6 +8,7 @@ import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../page_frame.dart';
+import '../online.dart';
 import '../robot_button.dart';
 import '../ai_chat.dart';
 import 'package:file_picker/file_picker.dart';
@@ -77,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     Sfx.instance.init();
+    _duel = DuelWatcher(context, s, () => pal)..start();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_appActive) {
         const ctx = ['play', 'rating', 'stats', 'train', 'lessons', 'passive'];
@@ -103,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     s.saveActivity();
     _timer?.cancel();
+    _duel?.stop();
     _engine.stop();
     _firstCtl.dispose();
     _lastCtl.dispose();
@@ -186,7 +189,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // ---- O'yin holati -------------------------------------------------------
 
-  (String, String)? _premove; // oldindan belgilangan yurish (from, to)
+  DuelWatcher? _duel;
+  final List<(String, String)> _premoves = []; // premove navbati (10 tagacha)
   String? _resigned; // taslim bo'lgan tomon: 'white' | 'black'
   bool _drawAgreed = false; // ikki tomon kelishib durang qildi
   bool _drawBusy = false;
@@ -306,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _timeoutLoser = null;
       _drawAgreed = false;
       _resigned = null;
-      _premove = null;
+      _premoves.clear();
       _thinking = false;
       _endHandled = false;
       _engineFail = false;
@@ -431,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _timeoutLoser = null;
       _drawAgreed = false;
       _resigned = null;
-      _premove = null;
+      _premoves.clear();
       _endHandled = false;
       _boardKey++;
     });
@@ -619,10 +623,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Kompyuter yurgandan so'ng oldindan belgilangan yurishni bajaradi (mumkin bo'lsa).
   void _tryPremove() {
-    final pm = _premove;
-    if (pm == null) return;
-    _premove = null;
-    if (_over || _engineTurn || !mounted) return;
+    if (_premoves.isEmpty) return;
+    final pm = _premoves.removeAt(0);
+    if (_over || _engineTurn || !mounted) {
+      _premoves.clear();
+      return;
+    }
     final legal = (_game.moves({'verbose': true}) as List).cast<Map>();
     Map? pick;
     for (final m in legal) {
@@ -631,6 +637,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     if (pick == null) {
+      _premoves.clear();
       setState(() {});
       return;
     }
@@ -1221,6 +1228,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ],
         ),
         const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: s.token == null ? null : () => showDuelLobby(context, s, pal),
+          icon: const Icon(Icons.sports_martial_arts, size: 20),
+          label: lab('du_challenge'),
+        ),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -1271,10 +1284,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       premoveColor: (_vsComputer && !_over)
           ? (_userWhite ? ch.Color.WHITE : ch.Color.BLACK)
           : null,
-      premoveFrom: _premove?.$1,
-      premoveTo: _premove?.$2,
-      onPremove: (f, t2) => setState(
-          () => _premove = (f == null || t2 == null) ? null : (f, t2)),
+      premoves: List.of(_premoves),
+      onPremove: (f, t2) => setState(() {
+        if (f == null || t2 == null) {
+          _premoves.clear();
+        } else if (_premoves.length < 10) {
+          _premoves.add((f, t2));
+        }
+      }),
     );
     return LayoutBuilder(
       builder: (context, c) {
@@ -1515,8 +1532,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           _showProfile = false;
                         }),
                       )
-                    : (_tab == 6 && s.role != 'coach'
-                        ? AiChatView(settings: s, pal: pal)
+                    : (_tab == 6
+                        ? AiChatView(
+                            settings: s,
+                            pal: pal,
+                            onOpenStudent: s.role == 'coach'
+                                ? (id) {
+                                    coachFocusStudent.value = null;
+                                    coachFocusStudent.value = id;
+                                    _selectTab(3);
+                                  }
+                                : null,
+                          )
                         : (_tab == 5
                         ? _settingsView()
                         : (_tab == 4
@@ -2409,7 +2436,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (Icons.assignment, t('nav_tasks')),
         (Icons.menu_book, t('nav_lessons')),
         (Icons.settings, t('nav_settings')),
-        if (s.role != 'coach') (Icons.smart_toy, 'A-CHESS AI'),
+        (Icons.smart_toy, 'A-CHESS AI'),
       ];
 
   Widget _navTile(IconData icon, String label, int i) {
@@ -2603,7 +2630,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             for (var i = 0; i < tabs.length && i < 6; i++)
               _navTile(tabs[i].$1, tabs[i].$2, i),
             const Spacer(),
-            if (s.role != 'coach') _aiTile(),
+            _aiTile(),
             _profileTile(),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),

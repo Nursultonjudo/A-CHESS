@@ -799,15 +799,13 @@ class ChessBoard extends StatefulWidget {
     this.enabled = true,
     this.flipped = false,
     this.premoveColor,
-    this.premoveFrom,
-    this.premoveTo,
+    this.premoves = const [],
     this.onPremove,
   });
 
   /// Premove: raqib yurayotganda keyingi yurishni oldindan belgilash.
   final ch.Color? premoveColor;
-  final String? premoveFrom;
-  final String? premoveTo;
+  final List<(String, String)> premoves;
   final void Function(String? from, String? to)? onPremove;
 
   final bool flipped;
@@ -868,15 +866,47 @@ class _ChessBoardState extends State<ChessBoard> {
   ch.Color get _ownColor =>
       _premoveMode ? widget.premoveColor! : widget.game.turn;
 
+  /// Premove rejimida: navbatdagi premovelar ketma-ket bajarilgan taxminiy pozitsiya.
+  ch.Chess? _hypo() {
+    final own = widget.premoveColor == ch.Color.WHITE ? 'w' : 'b';
+    try {
+      var g = ch.Chess.fromFEN(widget.game.fen);
+      for (var i = 0; i <= widget.premoves.length; i++) {
+        final parts = g.fen.split(' ');
+        if (parts.length < 4) return null;
+        parts[1] = own;
+        parts[3] = '-';
+        g = ch.Chess.fromFEN(parts.join(' '));
+        if (i == widget.premoves.length) break;
+        final pm = widget.premoves[i];
+        final before = g.history.length;
+        g.move({'from': pm.$1, 'to': pm.$2, 'promotion': 'q'});
+        if (g.history.length == before) return null;
+      }
+      return g;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _hKey;
+  ch.Chess? _hVal;
+
+  ch.Chess get _view {
+    if (!_premoveMode) return widget.game;
+    final key = '${widget.game.fen}|${widget.premoves}';
+    if (key != _hKey) {
+      _hKey = key;
+      _hVal = _hypo();
+    }
+    return _hVal ?? widget.game;
+  }
+
   List _movesFrom(String sq) {
     if (_premoveMode) {
-      // Premove: navbat bizda bo'lganda mumkin bo'ladigan yurishlar (taxminiy)
-      final parts = widget.game.fen.split(' ');
-      if (parts.length < 4) return const [];
-      parts[1] = widget.premoveColor == ch.Color.WHITE ? 'w' : 'b';
-      parts[3] = '-';
+      final g = _hypo();
+      if (g == null) return const [];
       try {
-        final g = ch.Chess.fromFEN(parts.join(' '));
         return g.moves({'verbose': true, 'square': sq}) as List;
       } catch (_) {
         return const [];
@@ -899,7 +929,7 @@ class _ChessBoardState extends State<ChessBoard> {
     if (!widget.enabled && !_premoveMode) return;
     final sq = _sqAt(p, cell);
     if (sq == null) return;
-    final game = widget.game;
+    final game = _view;
     _wasSelected = _selected == sq;
     // Tanlangan figura bor va bu mumkin bo'lgan katak: oddiy bosib yurish.
     if (_selected != null && _targets.contains(sq)) {
@@ -974,7 +1004,7 @@ class _ChessBoardState extends State<ChessBoard> {
 
   void _onTap(String sq) {
     if (!widget.enabled && !_premoveMode) return;
-    final game = widget.game;
+    final game = _view;
     final from = _selected;
 
     if (from != null && _targets.contains(sq)) {
@@ -994,7 +1024,7 @@ class _ChessBoardState extends State<ChessBoard> {
     final game = widget.game;
     if (_premoveMode) {
       setState(_clear);
-      widget.onPremove!(from, sq);
+      if (widget.premoves.length < 10) widget.onPremove!(from, sq);
       return;
     }
     {
@@ -1176,7 +1206,7 @@ class _ChessBoardState extends State<ChessBoard> {
                     height: cell * 1.16,
                     child: IgnorePointer(
                       child: Builder(builder: (_) {
-                        final pc = widget.game.get(_dragFrom!);
+                        final pc = _view.get(_dragFrom!);
                         if (pc == null) return const SizedBox.shrink();
                         return PieceView(
                           kind: kindOf(pc.type),
@@ -1198,12 +1228,12 @@ class _ChessBoardState extends State<ChessBoard> {
   Widget _cell(int row, int col, double cell, String? checked) {
     final sq = _square(row, col);
     final isLight = (row + col) % 2 == 0;
-    final piece = widget.game.get(sq);
+    final piece = (_premoveMode && widget.premoves.isNotEmpty ? _view : widget.game).get(sq);
     final isTarget = _targets.contains(sq);
     final isLast = sq == widget.lastFrom || sq == widget.lastTo;
     final isSel = sq == _selected;
 
-    final isPremove = sq == widget.premoveFrom || sq == widget.premoveTo;
+    final isPremove = widget.premoves.any((m) => m.$1 == sq || m.$2 == sq);
     final hiddenPiece = _dragActive && sq == _dragFrom;
     final hover = _dragActive && sq == _hoverSq && isTarget;
     return ColoredBox(

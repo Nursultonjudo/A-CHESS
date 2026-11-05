@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'l10n.dart';
+import 'puzzle_import.dart';
 import 'puzzles.dart';
 import 'settings.dart';
 import 'widgets/chess_board.dart';
@@ -41,6 +42,7 @@ class _PuzzleMakerPageState extends State<PuzzleMakerPage> {
   int _boardKey = 0;
   MoveRecord? _pending;
   final List<String> _solutions = [];
+  List<String> _suggest = []; // fayldan kelgan taklif yechim
 
   AppSettings get s => widget.settings;
   Pal get pal => widget.pal;
@@ -165,7 +167,29 @@ class _PuzzleMakerPageState extends State<PuzzleMakerPage> {
       _boardKey++;
       _pending = null;
       _solutions.clear();
+      for (final m in _suggest) {
+        try {
+          final ok = (_game!.moves({'verbose': true}) as List)
+              .any((x) => '${(x as Map)['from']}${x['to']}' == m);
+          if (ok) _solutions.add(m);
+        } catch (_) {}
+      }
     });
+  }
+
+  Future<void> _importFile() async {
+    final r = await importPositionFromFile(context, s, pal);
+    if (r == null || !mounted) return;
+    setState(() {
+      _fenCtl.text = r.fen;
+      _suggest = r.solutions;
+      if (_title.text.trim().isEmpty && r.title.isNotEmpty) _title.text = r.title;
+    });
+    _applyFen();
+    if (r.fromAi && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(t('pi_check'))));
+    }
   }
 
   void _addSolution() {
@@ -366,6 +390,16 @@ class _PuzzleMakerPageState extends State<PuzzleMakerPage> {
         _cardBox(Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            OutlinedButton.icon(
+              onPressed: _importFile,
+              icon: const Icon(Icons.upload_file),
+              label: Text(t('pi_button')),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 10),
+              child: Text(t('pi_hint'),
+                  style: TextStyle(color: pal.subtext, fontSize: 12)),
+            ),
             TextField(
               controller: _title,
               decoration: InputDecoration(labelText: t('pm_name')),
