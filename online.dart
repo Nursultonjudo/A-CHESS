@@ -956,7 +956,7 @@ class _OnlineGamePageState extends State<OnlineGamePage> {
                       ]),
                       const SizedBox(height: 8),
                       Text(
-                        v['pending'] == true
+                        _v?['pending'] == true
                             ? t('du_wait_start')
                             : (_myTurn ? t('du_my_turn') : t('du_opp_turn')),
                         textAlign: TextAlign.center,
