@@ -10,6 +10,9 @@ import 'package:flutter/services.dart';
 import '../page_frame.dart';
 import '../online.dart';
 import '../people.dart';
+import '../chat.dart';
+import '../flags.dart';
+import '../tournaments.dart';
 import '../robot_button.dart';
 import '../ai_chat.dart';
 import 'package:file_picker/file_picker.dart';
@@ -70,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _timeoutLoser; // 'white' yoki 'black'
   Timer? _timer;
   int? _rating;
+  int? _puzzleRating;
   final EngineService _engine = EngineService.instance;
 
   AppSettings get s => widget.settings;
@@ -138,6 +142,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final user = (jsonDecode(res.body) as Map)['user'] as Map;
         final r = user['rating'];
         if (mounted && r is int) setState(() => _rating = r);
+        final pr = user['puzzleRating'];
+        if (mounted && pr is int) setState(() => _puzzleRating = pr);
         final srvFirst = (user['firstName'] as String?) ?? '';
         final srvLast = (user['lastName'] as String?) ?? '';
         final srvBirth = (user['birthDate'] as String?) ?? '';
@@ -819,6 +825,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Expanded(child: _resultChip())
         else
           const Spacer(),
+        const SizedBox(width: 8),
+        ChatButton(settings: s, pal: pal),
         const SizedBox(width: 8),
         PeopleSearchButton(settings: s, pal: pal),
       ],
@@ -1553,7 +1561,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           _showProfile = false;
                         }),
                       )
-                    : (_tab == 6
+                    : (_tab == 7
+                        ? TournamentsView(settings: s, pal: pal)
+                        : (_tab == 6
                         ? AiChatView(
                             settings: s,
                             pal: pal,
@@ -1571,7 +1581,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ? LessonsView(settings: s, pal: pal)
                         : (_tab == 1
                             ? RatingView(settings: s, pal: pal)
-                            : StatsView(settings: s, pal: pal))))))),
+                            : StatsView(settings: s, pal: pal)))))))),
       );
 
 
@@ -1868,15 +1878,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                t('profile'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: w.text,
+              Row(children: [
+                const SizedBox(width: 44),
+                Expanded(
+                  child: Text(
+                    t('profile'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: w.text,
+                    ),
+                  ),
                 ),
-              ),
+                ChatButton(settings: s, pal: pal),
+              ]),
               const SizedBox(height: 20),
               Center(
                 child: Stack(
@@ -2056,6 +2072,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 8),
                   Text(
                     '${t('my_rating')}: ${_rating ?? '—'}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: w.text,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.extension, color: w.accent),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${t('rt_puzzle_rating')}: ${_puzzleRating ?? '—'}',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: w.text,
@@ -2422,7 +2452,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onSelected: (v) => s.setLang(v),
       itemBuilder: (_) => [
         for (final e in languageNames.entries)
-          PopupMenuItem(value: e.key, child: Text(e.value)),
+          PopupMenuItem(
+            value: e.key,
+            child: Row(children: [
+              SizedBox(
+                width: 62,
+                child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: LangFlags(lang: e.key, height: 18)),
+              ),
+              const SizedBox(width: 6),
+              Text(e.value),
+            ]),
+          ),
       ],
       child: Container(
         height: 48 * scale,
@@ -2431,7 +2473,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.language, size: 24 * scale, color: pal.accent),
+            GlobeIcon(size: 26 * scale),
             SizedBox(width: 7 * scale),
             Text(
               s.lang.toUpperCase(),
@@ -2496,6 +2538,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (Icons.menu_book, t('nav_lessons')),
         (Icons.settings, t('nav_settings')),
         (Icons.smart_toy, 'A-CHESS AI'),
+        (Icons.emoji_events, t('nav_tours')),
       ];
 
   Widget _navTile(IconData icon, String label, int i) {
@@ -2690,6 +2733,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             for (var i = 0; i < tabs.length && i < 6; i++)
               _navTile(tabs[i].$1, tabs[i].$2, i),
+            _navTile(tabs[7].$1, tabs[7].$2, 7),
             const Spacer(),
             _aiTile(),
             _profileTile(),
