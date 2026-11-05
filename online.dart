@@ -7,15 +7,17 @@ import 'api.dart';
 import 'game_viewer.dart';
 import 'l10n.dart';
 import 'page_frame.dart';
+import 'people.dart';
 import 'pgn.dart';
 import 'settings.dart';
 import 'sound.dart';
 import 'widgets/chess_board.dart';
 
 /// Onlayn duel: raqibga ID orqali taklif yuborish yoki tasodifiy raqib topish.
-Future<void> showDuelLobby(BuildContext context, AppSettings s, Pal pal) =>
+Future<void> showDuelLobby(BuildContext context, AppSettings s, Pal pal,
+        {String? presetId}) =>
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => DuelLobbyPage(settings: s, pal: pal),
+      builder: (_) => DuelLobbyPage(settings: s, pal: pal, presetId: presetId),
     ));
 
 /// Kelgan takliflarni va boshlangan partiyalarni kuzatuvchi (HomeScreen ichida ishlatiladi).
@@ -66,16 +68,18 @@ class DuelWatcher {
     String t(String k, [Map<String, String> a = const {}]) => tr(s.lang, k, a);
     final from = (iv['from'] as Map?) ?? const {};
     final time = '${iv['minutes']}+${iv['inc']}';
+    final msg = t('du_incoming', {
+      'name': '${from['name'] ?? ''}',
+      'id': '${from['publicId'] ?? ''}',
+      'time': time,
+    });
+    final tag = iv['rated'] == true ? t('du_rated_tag') : t('du_friendly_tag');
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (c) => AlertDialog(
         title: Text(t('du_title')),
-        content: Text(t('du_incoming', {
-          'name': '${from['name'] ?? ''}',
-          'id': '${from['publicId'] ?? ''}',
-          'time': time,
-        })),
+        content: Text('$msg\n\n$tag'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
@@ -116,9 +120,11 @@ Future<void> openDuelGame(
 // ---------------------------------------------------------------------------
 
 class DuelLobbyPage extends StatefulWidget {
-  const DuelLobbyPage({super.key, required this.settings, required this.pal});
+  const DuelLobbyPage(
+      {super.key, required this.settings, required this.pal, this.presetId});
   final AppSettings settings;
   final Pal pal;
+  final String? presetId;
   @override
   State<DuelLobbyPage> createState() => _DuelLobbyPageState();
 }
@@ -137,10 +143,13 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
   Timer? _timer;
   bool _leaving = false;
 
+  bool _rated = false;
+
   @override
   void initState() {
     super.initState();
     DuelWatcher.inLobby = true;
+    if (widget.presetId != null) _idCtl.text = widget.presetId!;
   }
 
   @override
@@ -158,7 +167,7 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
   }
 
   Map<String, dynamic> get _time =>
-      {'minutes': _presets[_sel].$1, 'inc': _presets[_sel].$2};
+      {'minutes': _presets[_sel].$1, 'inc': _presets[_sel].$2, 'rated': _rated};
 
   void _err(Object e) {
     final key = e is ApiException ? e.l10nKey : 'err_network';
@@ -305,7 +314,39 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
                         onSelected: waiting ? null : (_) => setState(() => _sel = i),
                       ),
                   ]),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
+                  SegmentedButton<bool>(
+                    segments: [
+                      ButtonSegment(
+                          value: false,
+                          icon: const Icon(Icons.handshake_outlined),
+                          label: Text(t('du_friendly_opt'))),
+                      ButtonSegment(
+                          value: true,
+                          icon: const Icon(Icons.emoji_events_outlined),
+                          label: Text(t('du_rated_opt'))),
+                    ],
+                    selected: {_rated},
+                    onSelectionChanged:
+                        waiting ? null : (v) => setState(() => _rated = v.first),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(_rated ? t('du_rated_hint') : t('du_friendly'),
+                      style: TextStyle(fontSize: 11.5, color: pal.subtext)),
+                  const SizedBox(height: 14),
+                  Row(children: [
+                    Expanded(
+                      child: Text(t('pe_pick_from_list'),
+                          style: TextStyle(color: pal.subtext, fontSize: 12.5)),
+                    ),
+                    PeopleSearchButton(
+                      settings: s,
+                      pal: pal,
+                      onPick: (u) => setState(
+                          () => _idCtl.text = '${u['publicId']}'),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
                   TextField(
                     controller: _idCtl,
                     enabled: !waiting,
@@ -348,9 +389,6 @@ class _DuelLobbyPageState extends State<DuelLobbyPage> {
                     const SizedBox(height: 10),
                     Text(_msg!, style: const TextStyle(color: Colors.redAccent)),
                   ],
-                  const SizedBox(height: 10),
-                  Text(t('du_friendly'),
-                      style: TextStyle(fontSize: 11.5, color: pal.subtext)),
                 ],
               ),
             ),
@@ -721,7 +759,8 @@ class _OnlineGamePageState extends State<OnlineGamePage> {
     return Scaffold(
       backgroundColor: pal.bg1,
       appBar: AppBar(
-        title: Text(t('du_title')),
+        title: Text(
+            '${t('du_title')} · ${v?['rated'] == true ? t('du_rated_opt') : t('du_friendly_opt')}'),
         actions: [
           if (_over)
             TextButton(
@@ -762,6 +801,20 @@ class _OnlineGamePageState extends State<OnlineGamePage> {
                                   color: pal.text)),
                           Text(t('du_r_${v!['reason']}'),
                               style: TextStyle(color: pal.subtext)),
+                          if (v['rated'] == true && v['delta'] != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                () {
+                                  final d = v['delta'] as Map;
+                                  final mine = _iWhite ? d['w'] : d['b'];
+                                  final now = _iWhite ? d['wNew'] : d['bNew'];
+                                  return '${t('du_rating')}: ${(mine as int) >= 0 ? '+' : ''}$mine  →  $now';
+                                }(),
+                                style: TextStyle(
+                                    color: pal.text, fontWeight: FontWeight.w700),
+                              ),
+                            ),
                           const SizedBox(height: 8),
                           Wrap(spacing: 8, runSpacing: 6, children: [
                             OutlinedButton.icon(

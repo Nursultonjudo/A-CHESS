@@ -50,7 +50,7 @@ class Pal {
   /// (fon, kartalar, yon panel ranglari).
   static Pal of(int style, bool dark, [int ui = 0]) {
     final s = (style < 0 || style > 2) ? 0 : style;
-    final u = (ui < 0 || ui > 2) ? 0 : ui;
+    final u = (ui < 0 || ui > 3) ? 3 : ui;
     final b = _pals[s][dark ? 1 : 0];
     final c = _uiPals[u][dark ? 1 : 0];
     return Pal(
@@ -141,6 +141,24 @@ const List<List<_UiPal>> _uiPals = [
       accent: Color(0xFF4DA3F5),
       navTop: Color(0xFF111418), navBottom: Color(0xFF111418),
       navText: Color(0xFFE4E8ED), navIcon: Color(0xFF8F9AA6),
+    ),
+  ],
+  [
+    _UiPal(
+      bg1: Color(0xFFEEEAE2), bg2: Color(0xFFEEEAE2),
+      card: Color(0xFFFAF8F3), cardBorder: Color(0xFFD5CDBE),
+      text: Color(0xFF1E1A16), subtext: Color(0xFF675F53),
+      accent: Color(0xFF9A7634),
+      navTop: Color(0xFF1C1814), navBottom: Color(0xFF14110E),
+      navText: Color(0xFFE9E1D3), navIcon: Color(0xFFA89C86),
+    ),
+    _UiPal(
+      bg1: Color(0xFF13100D), bg2: Color(0xFF13100D),
+      card: Color(0xFF1D1914), cardBorder: Color(0xFF362F27),
+      text: Color(0xFFECE4D6), subtext: Color(0xFFA09584),
+      accent: Color(0xFFC4A55E),
+      navTop: Color(0xFF0F0D0A), navBottom: Color(0xFF0A0907),
+      navText: Color(0xFFE9E1D3), navIcon: Color(0xFFA09584),
     ),
   ],
 ];
@@ -699,6 +717,281 @@ String formatClock(int seconds) {
 // ---------------------------------------------------------------------------
 
 /// Kataklarni chizadi: yog'och tolalari, marmar tomirlari yoki tekis rang.
+
+// ---------------------------------------------------------------------------
+// Giperrealistik yog'och doska: yagona shpon yuzasi, har katakda o'z tolalari,
+// g'ovaklar, kataklar orasidagi tikuv va laklangan yaltiroqlik.
+// ---------------------------------------------------------------------------
+
+extension _AlphaD on Color {
+  Color alphaD(double a) => withAlpha((a.clamp(0.0, 1.0) * 255).round());
+}
+
+class _WoodBoardPainter extends CustomPainter {
+  const _WoodBoardPainter();
+
+  // Och katak: zarg'aldoq/chinor shponi; to'q katak: yong'oq (walnut) shponi.
+  static const _lightA = Color(0xFFF1DDB3);
+  static const _lightB = Color(0xFFDDBB86);
+  static const _darkA = Color(0xFF8F5C36);
+  static const _darkB = Color(0xFF5C3519);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cell = size.width / 8;
+    for (var r = 0; r < 8; r++) {
+      for (var c = 0; c < 8; c++) {
+        final light = (r + c) % 2 == 0;
+        _square(canvas, Offset(c * cell, r * cell), cell, light, r * 8 + c);
+      }
+    }
+    // Kataklar orasidagi nozik tikuv chiziqlari
+    final joint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(0.6, cell * 0.012)
+      ..color = const Color(0x40200E02);
+    for (var i = 1; i < 8; i++) {
+      canvas.drawLine(Offset(i * cell, 0), Offset(i * cell, size.height), joint);
+      canvas.drawLine(Offset(0, i * cell), Offset(size.width, i * cell), joint);
+    }
+  }
+
+  void _square(Canvas canvas, Offset o, double cell, bool light, int seed) {
+    final rnd = math.Random(seed * 104729 + (light ? 17 : 31));
+    final rect = Rect.fromLTWH(o.dx, o.dy, cell, cell);
+    final tone = (rnd.nextDouble() - 0.5) * 0.16; // har katak biroz boshqacha rang
+    Color shade(Color c) => tone >= 0
+        ? Color.lerp(c, Colors.white, tone * 0.5)!
+        : Color.lerp(c, Colors.black, -tone * 0.7)!;
+    final a = shade(light ? _lightA : _darkA);
+    final b = shade(light ? _lightB : _darkB);
+    final horizontal = rnd.nextBool(); // shponning yo'nalishi har katakda har xil
+
+    canvas.save();
+    canvas.clipRect(rect);
+
+    // Asosiy rang (tola bo'ylab o'zgaruvchan)
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: horizontal ? Alignment.topCenter : Alignment.centerLeft,
+          end: horizontal ? Alignment.bottomCenter : Alignment.centerRight,
+          colors: [a, b, Color.lerp(a, b, 0.4)!],
+          stops: const [0, 0.65, 1],
+        ).createShader(rect),
+    );
+
+    // Keng yumshoq yillik halqa bantlari
+    final band = Paint()..style = PaintingStyle.stroke;
+    for (var i = 0; i < 5; i++) {
+      final t = rnd.nextDouble();
+      band
+        ..strokeWidth = cell * (0.05 + rnd.nextDouble() * 0.12)
+        ..color = (light ? const Color(0xFF8A5A22) : const Color(0xFF1E0E03))
+            .alphaD(0.05 + rnd.nextDouble() * 0.06);
+      final path = Path();
+      if (horizontal) {
+        final y = o.dy + cell * t;
+        path.moveTo(o.dx, y);
+        path.cubicTo(o.dx + cell * 0.3, y + cell * (rnd.nextDouble() - 0.5) * 0.16,
+            o.dx + cell * 0.7, y + cell * (rnd.nextDouble() - 0.5) * 0.16, o.dx + cell, y);
+      } else {
+        final x = o.dx + cell * t;
+        path.moveTo(x, o.dy);
+        path.cubicTo(x + cell * (rnd.nextDouble() - 0.5) * 0.16, o.dy + cell * 0.3,
+            x + cell * (rnd.nextDouble() - 0.5) * 0.16, o.dy + cell * 0.7, x, o.dy + cell);
+      }
+      canvas.drawPath(path, band);
+    }
+
+    // Ingichka tolalar
+    final fine = Paint()..style = PaintingStyle.stroke;
+    final n = 26 + rnd.nextInt(10);
+    for (var i = 0; i < n; i++) {
+      final t = (i + rnd.nextDouble()) / n;
+      final amp = cell * (0.004 + rnd.nextDouble() * 0.018);
+      final ph = rnd.nextDouble() * math.pi * 2;
+      final f = 1.2 + rnd.nextDouble() * 2.2;
+      final dark = rnd.nextDouble() < 0.72;
+      fine
+        ..strokeWidth = math.max(0.35, cell * (0.0035 + rnd.nextDouble() * 0.009))
+        ..color = (dark
+                ? (light ? const Color(0xFF7A4A1C) : const Color(0xFF1A0B02))
+                : (light ? const Color(0xFFFFF3D6) : const Color(0xFFC08A5A)))
+            .alphaD(dark ? 0.10 + rnd.nextDouble() * 0.16 : 0.10 + rnd.nextDouble() * 0.10);
+      final path = Path();
+      const steps = 10;
+      for (var k = 0; k <= steps; k++) {
+        final u = k / steps;
+        final w = math.sin(u * math.pi * f + ph) * amp +
+            math.sin(u * math.pi * 5.3 + ph * 2) * amp * 0.35;
+        final x = horizontal ? o.dx + cell * u : o.dx + cell * t + w;
+        final y = horizontal ? o.dy + cell * t + w : o.dy + cell * u;
+        if (k == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, fine);
+    }
+
+    // G'ovaklar (mayda qora chiziqchalar)
+    final pore = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = math.max(0.4, cell * 0.006)
+      ..color = (light ? const Color(0xFF5A3510) : const Color(0xFF0E0501))
+          .alphaD(0.30);
+    for (var i = 0; i < 34; i++) {
+      final x = o.dx + rnd.nextDouble() * cell;
+      final y = o.dy + rnd.nextDouble() * cell;
+      final len = cell * (0.015 + rnd.nextDouble() * 0.05);
+      canvas.drawLine(Offset(x, y),
+          horizontal ? Offset(x + len, y) : Offset(x, y + len), pore);
+    }
+
+    // Ba'zi kataklarda kichik chigal (o'zak) belgisi
+    if (rnd.nextDouble() < 0.12) {
+      final c = Offset(o.dx + cell * (0.25 + rnd.nextDouble() * 0.5),
+          o.dy + cell * (0.25 + rnd.nextDouble() * 0.5));
+      for (var k = 1; k <= 3; k++) {
+        canvas.drawOval(
+          Rect.fromCenter(
+              center: c,
+              width: cell * 0.05 * k * (horizontal ? 1.8 : 1),
+              height: cell * 0.05 * k * (horizontal ? 1 : 1.8)),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = math.max(0.4, cell * 0.006)
+            ..color = (light ? const Color(0xFF6B3E12) : const Color(0xFF120601))
+                .alphaD(0.28 - k * 0.05),
+        );
+      }
+    }
+
+    // Katak chetidagi yengil yorug'lik/soya (inleyning ko'tarilgan qirrasi)
+    final edge = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(0.6, cell * 0.014);
+    edge.color = const Color(0x26FFFFFF);
+    canvas.drawLine(o + const Offset(0.5, 0.5), o + Offset(cell, 0.5), edge);
+    canvas.drawLine(o + const Offset(0.5, 0.5), o + Offset(0.5, cell), edge);
+    edge.color = const Color(0x2E000000);
+    canvas.drawLine(o + Offset(0.5, cell - 0.5), o + Offset(cell, cell - 0.5), edge);
+    canvas.drawLine(o + Offset(cell - 0.5, 0.5), o + Offset(cell - 0.5, cell), edge);
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _WoodBoardPainter old) => false;
+}
+
+/// Laklangan yuza: yumshoq nur yaltirashi va chetlarda qorayish.
+class _LacquerPainter extends CustomPainter {
+  const _LacquerPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0x2EFFFFFF), Color(0x00FFFFFF), Color(0x00000000), Color(0x26000000)],
+          stops: [0, 0.38, 0.6, 1],
+        ).createShader(rect),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const RadialGradient(
+          center: Alignment(-0.45, -0.55),
+          radius: 0.85,
+          colors: [Color(0x26FFFFFF), Color(0x00FFFFFF)],
+        ).createShader(rect),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const RadialGradient(
+          radius: 0.95,
+          colors: [Color(0x00000000), Color(0x00000000), Color(0x38000000)],
+          stops: [0, 0.72, 1],
+        ).createShader(rect),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LacquerPainter old) => false;
+}
+
+/// Doska ramkasi: uzun yong'oq tolalari va qirra yaltirashi.
+class _WoodFramePainter extends CustomPainter {
+  const _WoodFramePainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rnd = math.Random(777);
+    final rr = RRect.fromRectAndRadius(rect, Radius.circular(size.width * 0.012));
+    canvas.save();
+    canvas.clipRRect(rr);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF7B4A28), Color(0xFF5A3219), Color(0xFF3F220F)],
+        ).createShader(rect),
+    );
+    final p = Paint()..style = PaintingStyle.stroke;
+    for (var i = 0; i < 150; i++) {
+      final y = size.height * rnd.nextDouble();
+      final amp = size.height * (0.002 + rnd.nextDouble() * 0.006);
+      final ph = rnd.nextDouble() * math.pi * 2;
+      final dark = rnd.nextDouble() < 0.7;
+      p
+        ..strokeWidth = math.max(0.4, size.height * (0.0012 + rnd.nextDouble() * 0.003))
+        ..color = (dark ? const Color(0xFF1B0C03) : const Color(0xFFD9A06A))
+            .alphaD(dark ? 0.16 + rnd.nextDouble() * 0.14 : 0.10);
+      final path = Path()..moveTo(0, y);
+      for (var k = 1; k <= 16; k++) {
+        final u = k / 16;
+        path.lineTo(size.width * u,
+            y + math.sin(u * math.pi * 3 + ph) * amp + math.sin(u * 17 + ph) * amp * 0.3);
+      }
+      canvas.drawPath(path, p);
+    }
+    // Yuqoridan yorug'lik, pastdan soya
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0x38FFFFFF), Color(0x00FFFFFF), Color(0x40000000)],
+          stops: [0, 0.4, 1],
+        ).createShader(rect),
+    );
+    canvas.restore();
+    // Qirra: tashqarida yorug', ichkarida qorong'u chiziq
+    canvas.drawRRect(
+      rr.deflate(1),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..color = const Color(0x55FFE3B8),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _WoodFramePainter old) => false;
+}
+
 class _SquarePainter extends CustomPainter {
   const _SquarePainter({
     required this.style,
@@ -1125,6 +1418,12 @@ class _ChessBoardState extends State<ChessBoard> {
             ),
             child: Stack(
               children: [
+                if (widget.style == 0)
+                  const Positioned.fill(
+                    child: RepaintBoundary(
+                      child: CustomPaint(painter: _WoodFramePainter()),
+                    ),
+                  ),
                 for (var i = 0; i < 8; i++) ...[
                   Positioned(
                     left: 0,
@@ -1180,17 +1479,30 @@ class _ChessBoardState extends State<ChessBoard> {
                         decoration: BoxDecoration(
                           border: Border.all(color: pal.frameLine, width: 1.2),
                         ),
-                        child: Column(
+                        child: Stack(
+                          fit: StackFit.expand,
                           children: [
-                            for (var r = 0; r < 8; r++)
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    for (var f = 0; f < 8; f++)
-                                      Expanded(
-                                          child: _cell(r, f, cell, checked)),
-                                  ],
-                                ),
+                            if (widget.style == 0)
+                              const RepaintBoundary(
+                                child: CustomPaint(painter: _WoodBoardPainter()),
+                              ),
+                            Column(
+                              children: [
+                                for (var r = 0; r < 8; r++)
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        for (var f = 0; f < 8; f++)
+                                          Expanded(
+                                              child: _cell(r, f, cell, checked)),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (widget.style == 0)
+                              const IgnorePointer(
+                                child: CustomPaint(painter: _LacquerPainter()),
                               ),
                           ],
                         ),
@@ -1241,14 +1553,15 @@ class _ChessBoardState extends State<ChessBoard> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CustomPaint(
-            painter: _SquarePainter(
-              style: widget.style,
-              light: isLight,
-              seed: row * 8 + col,
-              base: isLight ? widget.pal.boardLight : widget.pal.boardDark,
+          if (widget.style != 0)
+            CustomPaint(
+              painter: _SquarePainter(
+                style: widget.style,
+                light: isLight,
+                seed: row * 8 + col,
+                base: isLight ? widget.pal.boardLight : widget.pal.boardDark,
+              ),
             ),
-          ),
           if (isLast) const ColoredBox(color: Color(0x80CDD26A)),
           if (isSel) const ColoredBox(color: Color(0x99F6F669)),
           if (checked == sq)

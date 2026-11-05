@@ -19,10 +19,12 @@ class AppSettings extends ChangeNotifier {
         boardStyle = _prefs.getInt('boardStyle') ?? 0,
         clockStyle = _prefs.getInt('clockStyle') ?? 0,
         pieceSet = _prefs.getInt('pieceSetV2') ?? 0,
-        uiStyle = _prefs.getInt('uiStyle') ?? 0,
+        uiStyle = _prefs.getInt('uiStyle') ?? 3,
         role = _prefs.getString('role'),
         inviteCode = _prefs.getString('inviteCode'),
         publicId = _prefs.getString('publicId') ?? '',
+        username = _prefs.getString('username') ?? '',
+        bio = _prefs.getString('bio') ?? '',
         engineOn = _prefs.getBool('engineOn') ?? true,
         bestHint = _prefs.getBool('bestHint') ?? true,
         coordSize = _prefs.getInt('coordSize') ?? 1,
@@ -62,6 +64,8 @@ class AppSettings extends ChangeNotifier {
   String? role; // 'student' | 'coach' | null
   String? inviteCode; // trenerning taklif kodi
   String publicId; // ochiq ID raqam (duel uchun)
+  String username; // @username
+  String bio; // o'zi haqida qisqa ma'lumot
   int coordSize; // 0 kichik, 1 o'rta, 2 katta
   int coordFont; // 0 oddiy, 1 antiqa, 2 texnik
   String? birthDate; // yyyy-MM-dd
@@ -468,6 +472,10 @@ class AppSettings extends ChangeNotifier {
       publicId = pid;
       await _prefs.setString('publicId', pid);
     }
+    username = (user['username'] as String?) ?? username;
+    bio = (user['bio'] as String?) ?? bio;
+    await _prefs.setString('username', username);
+    await _prefs.setString('bio', bio);
     final fn = (user['firstName'] as String?) ?? '';
     final ln = (user['lastName'] as String?) ?? '';
     if (fn.isNotEmpty || ln.isNotEmpty) {
@@ -539,6 +547,14 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setUsernameBio(String u, String b) async {
+    username = u;
+    bio = b;
+    await _prefs.setString('username', u);
+    await _prefs.setString('bio', b);
+    notifyListeners();
+  }
+
   Future<void> setBirthDate(String? v) async {
     birthDate = v;
     if (v == null) {
@@ -576,6 +592,8 @@ class AppSettings extends ChangeNotifier {
     role = null;
     inviteCode = null;
     publicId = '';
+    username = '';
+    bio = '';
     solved = {};
     reviews = {};
     planDone = {};
@@ -594,6 +612,8 @@ class AppSettings extends ChangeNotifier {
       'role',
       'inviteCode',
       'publicId',
+      'username',
+      'bio',
       'solved',
       'reviews',
       'planDone',

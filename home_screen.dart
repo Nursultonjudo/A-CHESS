@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../page_frame.dart';
 import '../online.dart';
+import '../people.dart';
 import '../robot_button.dart';
 import '../ai_chat.dart';
 import 'package:file_picker/file_picker.dart';
@@ -48,6 +49,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       TextEditingController(text: s.firstName);
   late final TextEditingController _lastCtl =
       TextEditingController(text: s.lastName);
+  late final TextEditingController _userCtl =
+      TextEditingController(text: s.username);
+  late final TextEditingController _bioCtl = TextEditingController(text: s.bio);
   int _boardKey = 0;
   late int _baseSeconds = s.playSeconds;
   late int _incSeconds = s.playInc;
@@ -109,6 +113,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _engine.stop();
     _firstCtl.dispose();
     _lastCtl.dispose();
+    _userCtl.dispose();
+    _bioCtl.dispose();
     super.dispose();
   }
 
@@ -804,7 +810,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Yuqori o'ng qator: foydalanuvchi qidirish tugmasi (partiya tugaganda natija ham).
   Widget _statusCard() {
+    final over = _over;
+    return Row(
+      children: [
+        if (over)
+          Expanded(child: _resultChip())
+        else
+          const Spacer(),
+        const SizedBox(width: 8),
+        PeopleSearchButton(settings: s, pal: pal),
+      ],
+    );
+  }
+
+  Widget _resultChip() {
     final w = pal;
     final over = _over;
     return Container(
@@ -1802,18 +1823,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _saveProfile() async {
     await s.setName(_firstCtl.text.trim(), _lastCtl.text.trim());
     final token = s.token;
+    String? err;
     if (token != null) {
       try {
-        await Api.post('/me/name', token, {
+        final r = await Api.post('/me/name', token, {
           'firstName': s.firstName,
           'lastName': s.lastName,
           'birthDate': s.birthDate ?? '',
+          'username': _userCtl.text.trim(),
+          'bio': _bioCtl.text.trim(),
         });
-      } catch (_) {}
+        final u = (r['user'] as Map?)?.cast<String, dynamic>();
+        await s.setUsernameBio(
+          (u?['username'] as String?) ?? '',
+          (u?['bio'] as String?) ?? _bioCtl.text.trim(),
+        );
+      } on ApiException catch (e) {
+        err = t(e.l10nKey);
+        // Ism/familiya saqlandi, username/bio keyin
+        await s.setUsernameBio(s.username, _bioCtl.text.trim());
+      } catch (_) {
+        err = t('err_network');
+      }
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(t('saved'))));
+        .showSnackBar(SnackBar(content: Text(err ?? t('saved'))));
   }
 
   Widget _profileView() {
@@ -1953,6 +1988,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 decoration: InputDecoration(
                   labelText: t('last_name'),
                   prefixIcon: const Icon(Icons.badge_outlined),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _userCtl,
+                maxLength: 20,
+                decoration: InputDecoration(
+                  labelText: t('username'),
+                  prefixIcon: const Icon(Icons.alternate_email),
+                  border: const OutlineInputBorder(),
+                  counterText: '',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _bioCtl,
+                maxLength: 200,
+                minLines: 2,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: t('bio'),
+                  hintText: t('bio_hint'),
+                  prefixIcon: const Icon(Icons.notes),
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -2183,7 +2242,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<Widget> _appearanceSections(Pal p) {
     final boards = ['style_wood', 'style_marble', 'style_modern'];
     final clocks = ['clock_lcd', 'clock_flip', 'clock_classic'];
-    final uis = ['ui_school', 'ui_emerald', 'ui_ocean'];
+    final uis = ['ui_school', 'ui_emerald', 'ui_ocean', 'ui_classic'];
     return [
                     Text(
                       t('ui_style'),
@@ -2195,7 +2254,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        for (var i = 0; i < 3; i++) ...[
+                        for (var i = 0; i < 4; i++) ...[
                           if (i > 0) const SizedBox(width: 10),
                           Expanded(
                             child: _optionCard(
@@ -2486,6 +2545,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _openProfile() {
     _firstCtl.text = s.firstName;
     _lastCtl.text = s.lastName;
+    _userCtl.text = s.username;
+    _bioCtl.text = s.bio;
     setState(() => _showProfile = true);
   }
 
