@@ -18,7 +18,7 @@ class AppSettings extends ChangeNotifier {
         lastName = _prefs.getString('lastName') ?? '',
         boardStyle = _prefs.getInt('boardStyle') ?? 0,
         clockStyle = _prefs.getInt('clockStyle') ?? 0,
-        pieceSet = _prefs.getInt('pieceSetV2') ?? 0,
+        pieceSet = (_prefs.getInt('pieceSetV2') ?? 0).clamp(0, 2).toInt(),
         uiStyle = _prefs.getInt('uiStyle') ?? 3,
         role = _prefs.getString('role'),
         inviteCode = _prefs.getString('inviteCode'),

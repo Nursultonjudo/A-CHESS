@@ -1,7 +1,7 @@
 name: chess_app
 description: A-CHESS shaxmat ilovasi (kompyuter va Android)
 publish_to: none
-version: 0.36.1+37
+version: 0.37.6+44
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

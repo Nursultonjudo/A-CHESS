@@ -2400,51 +2400,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    for (var r = 0; r < 2; r++) ...[
-                      if (r > 0) const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          for (var i = r * 3; i < r * 3 + 3; i++) ...[
-                            if (i > r * 3) const SizedBox(width: 10),
-                            Expanded(
-                              child: _optionCard(
-                                selected: s.pieceSet == i,
-                                onTap: () => s.setPieceSet(i),
-                                label: i == 0
-                                    ? t('pieces_classic')
-                                    : const [
-                                        '',
-                                        'Charcoal',
-                                        'Emerald',
-                                        'Noir',
-                                        'Forest',
-                                        'Walnut'
-                                      ][i],
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    PieceView(
-                                      kind: PieceKind.knight,
-                                      white: true,
-                                      size: 52,
-                                      style: s.boardStyle,
-                                      pieceSet: i,
-                                    ),
-                                    PieceView(
-                                      kind: PieceKind.queen,
-                                      white: false,
-                                      size: 52,
-                                      style: s.boardStyle,
-                                      pieceSet: i,
-                                    ),
-                                  ],
-                                ),
+                    Row(
+                      children: [
+                        for (var i = 0; i < 3; i++) ...[
+                          if (i > 0) const SizedBox(width: 10),
+                          Expanded(
+                            child: _optionCard(
+                              selected: s.pieceSet == i,
+                              onTap: () => s.setPieceSet(i),
+                              label: i == 0
+                                  ? t('pieces_classic')
+                                  : (i == 1 ? 'Charcoal' : 'Emerald'),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  PieceView(
+                                    kind: PieceKind.knight,
+                                    white: true,
+                                    size: 52,
+                                    style: s.boardStyle,
+                                    pieceSet: i,
+                                  ),
+                                  PieceView(
+                                    kind: PieceKind.queen,
+                                    white: false,
+                                    size: 52,
+                                    style: s.boardStyle,
+                                    pieceSet: i,
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
                         ],
-                      ),
-                    ],
+                      ],
+                    ),
                     const SizedBox(height: 20),
                     Text(
                       t('clock_style'),
