@@ -47,14 +47,15 @@ class RatingView extends StatefulWidget {
 }
 
 class _RatingViewState extends State<RatingView> {
-  bool _lazy = false; // false: yetakchilar, true: dangasalar doskasi
-  String _kind = 'games'; // 'games' — partiyalar reytingi, 'puzzle' — masalalar reytingi
   List<Map<String, dynamic>> _lazyItems = [];
   Map<String, dynamic>? _lazyMe;
   int _lazyTotal = 0;
-  List<Map<String, dynamic>> _items = [];
-  Map<String, dynamic>? _me;
-  int _total = 0;
+  List<Map<String, dynamic>> _itemsG = [];
+  Map<String, dynamic>? _meG;
+  int _totalG = 0;
+  List<Map<String, dynamic>> _itemsP = [];
+  Map<String, dynamic>? _meP;
+  int _totalP = 0;
   bool _loading = true;
   String? _error;
 
@@ -79,13 +80,17 @@ class _RatingViewState extends State<RatingView> {
       try {
         await syncProgress(s);
       } catch (_) {}
-      final res = await Api.get('/leaderboard?type=$_kind', token);
+      final resG = await Api.get('/leaderboard?type=games', token);
+      final resP = await Api.get('/leaderboard?type=puzzle', token);
       final lz = await Api.get('/leaderboard/lazy', token);
       if (!mounted) return;
       setState(() {
-        _items = (res['items'] as List).cast<Map<String, dynamic>>();
-        _me = res['me'] as Map<String, dynamic>?;
-        _total = (res['total'] as num).toInt();
+        _itemsG = (resG['items'] as List).cast<Map<String, dynamic>>();
+        _meG = resG['me'] as Map<String, dynamic>?;
+        _totalG = (resG['total'] as num).toInt();
+        _itemsP = (resP['items'] as List).cast<Map<String, dynamic>>();
+        _meP = resP['me'] as Map<String, dynamic>?;
+        _totalP = (resP['total'] as num).toInt();
         _lazyItems = (lz['items'] as List).cast<Map<String, dynamic>>();
         _lazyMe = lz['me'] as Map<String, dynamic>?;
         _lazyTotal = (lz['total'] as num).toInt();
@@ -100,7 +105,7 @@ class _RatingViewState extends State<RatingView> {
     }
   }
 
-  Widget _row(Map<String, dynamic> r) {
+  Widget _row(Map<String, dynamic> r, bool games) {
     final rank = (r['rank'] as num).toInt();
     final me = r['isMe'] == true;
     final medal = rank == 1
@@ -143,7 +148,9 @@ class _RatingViewState extends State<RatingView> {
             ),
           ),
           Text(
-            '${r['solved']} ${t('st_solved_short')}',
+            games
+                ? '${r['games'] ?? 0} ${t('rt_games_short')}'
+                : '${r['solved']} ${t('st_solved_short')}',
             style: TextStyle(fontSize: 12.5, color: pal.subtext),
           ),
           const SizedBox(width: 14),
@@ -216,202 +223,193 @@ class _RatingViewState extends State<RatingView> {
     );
   }
 
-  Widget _boardSwitch() => Padding(
-        padding: const EdgeInsets.only(bottom: 14),
-        child: SegmentedButton<bool>(
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
-              value: false,
-              icon: const Icon(Icons.emoji_events, size: 18),
-              label: Text(t('st_board_top')),
-            ),
-            ButtonSegment(
-              value: true,
-              icon: const Icon(Icons.bedtime_outlined, size: 18),
-              label: Text(t('st_board_lazy')),
-            ),
-          ],
-          selected: {_lazy},
-          onSelectionChanged: (v) => setState(() => _lazy = v.first),
-        ),
+  Widget _panelTitle(IconData icon, String text, {Widget? trailing}) => Row(
+        children: [
+          Icon(icon, color: pal.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w800, color: pal.text)),
+          ),
+          if (trailing != null) trailing,
+        ],
       );
 
-  Widget _lazyBody() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _card(
-          pal,
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text('🦥', style: TextStyle(fontSize: 22)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      t('st_lazy_title'),
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: pal.text,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: t('co_refresh'),
-                    onPressed: _loading ? null : _load,
-                    icon: Icon(Icons.refresh, color: pal.subtext),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_lazyMe != null)
-                Row(
-                  children: [
-                    _big('#${_lazyMe!['rank']}', t('st_rank')),
-                    const SizedBox(width: 10),
-                    _big('${_lazyMe!['minutes']}', t('st_active_min7')),
-                    const SizedBox(width: 10),
-                    _big('${_lazyMe!['solved']}', t('st_solved7')),
-                  ],
-                ),
-              const SizedBox(height: 10),
-              Text(
-                t('st_lazy_hint'),
-                style: TextStyle(fontSize: 12.5, color: pal.subtext),
-              ),
-            ],
-          ),
-        ),
-        for (final r in _lazyItems) _lazyRow(r),
-        if (_lazyTotal > _lazyItems.length)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Text('… $_lazyTotal',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: pal.subtext)),
-          ),
-      ],
+  Widget _ratingBlock(String kind) {
+    final games = kind == 'games';
+    final items = games ? _itemsG : _itemsP;
+    final me = games ? _meG : _meP;
+    final total = games ? _totalG : _totalP;
+    return _card(
+      pal,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _panelTitle(games ? Icons.sports_esports : Icons.extension,
+              games ? t('rt_games') : t('rt_puzzles')),
+          const SizedBox(height: 10),
+          if (me != null)
+            Row(
+              children: [
+                _big('#${me['rank']}', t('st_rank')),
+                const SizedBox(width: 10),
+                _big('${me['rating']}', t('st_rating')),
+                const SizedBox(width: 10),
+                _big('${me['solved']}', t('st_solved')),
+              ],
+            )
+          else
+            Text(t('st_coach_note'), style: TextStyle(color: pal.subtext)),
+          const SizedBox(height: 6),
+          if (items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(t('co_no_students'),
+                  style: TextStyle(color: pal.subtext)),
+            ),
+          for (final r in items) _row(r, games),
+          if (total > items.length)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text('… $total',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: pal.subtext)),
+            ),
+        ],
+      ),
     );
   }
 
+  Widget _lazyBlock() {
+    return _card(
+      pal,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _panelTitle(Icons.bedtime_outlined, t('st_lazy_title')),
+          const SizedBox(height: 10),
+          if (_lazyMe != null)
+            Row(
+              children: [
+                _big('#${_lazyMe!['rank']}', t('st_rank')),
+                const SizedBox(width: 10),
+                _big('${_lazyMe!['minutes']}', t('st_active_min7')),
+                const SizedBox(width: 10),
+                _big('${_lazyMe!['solved']}', t('st_solved7')),
+              ],
+            ),
+          const SizedBox(height: 10),
+          Text(t('st_lazy_hint'),
+              style: TextStyle(fontSize: 12.5, color: pal.subtext)),
+          for (final r in _lazyItems) _lazyRow(r),
+          if (_lazyTotal > _lazyItems.length)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text('… $_lazyTotal',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: pal.subtext)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header() => Row(
+        children: [
+          Icon(Icons.leaderboard, color: pal.accent, size: 26),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(t('st_rating_title'),
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.w800, color: pal.text)),
+          ),
+          IconButton(
+            tooltip: t('co_refresh'),
+            onPressed: _loading ? null : _load,
+            icon: Icon(Icons.refresh, color: pal.subtext),
+          ),
+        ],
+      );
+
   @override
   Widget build(BuildContext context) {
-    if (_lazy && !_loading && _error == null) {
-      return PageFrame(child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [_boardSwitch(), _lazyBody()],
-          ));
+    Widget status() {
+      if (_loading) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Text(t('co_loading'), style: TextStyle(color: pal.subtext)),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Text(_error ?? '', style: const TextStyle(color: Colors.redAccent)),
+      );
     }
-    return PageFrame(child: ListView(
-          padding: const EdgeInsets.all(16),
+
+    return LayoutBuilder(builder: (context, box) {
+      final wide = box.maxWidth >= 900;
+      final leaders = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sideHeading(Icons.emoji_events, t('st_board_top')),
+          _ratingBlock('games'),
+          const SizedBox(height: 14),
+          _ratingBlock('puzzle'),
+        ],
+      );
+      final lazy = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _sideHeading(Icons.bedtime_outlined, t('st_board_lazy')),
+          _lazyBlock(),
+        ],
+      );
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _boardSwitch(),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Wrap(spacing: 8, children: [
-                ChoiceChip(
-                  label: Text(t('rt_games')),
-                  selected: _kind == 'games',
-                  selectedColor: pal.accent.withAlpha(0x55),
-                  onSelected: (_) {
-                    setState(() => _kind = 'games');
-                    _load();
-                  },
-                ),
-                ChoiceChip(
-                  label: Text(t('rt_puzzles')),
-                  selected: _kind == 'puzzle',
-                  selectedColor: pal.accent.withAlpha(0x55),
-                  onSelected: (_) {
-                    setState(() => _kind = 'puzzle');
-                    _load();
-                  },
-                ),
-              ]),
-            ),
-            _card(
-              pal,
-              Column(
+            _header(),
+            const SizedBox(height: 10),
+            if (_loading || _error != null)
+              status()
+            else if (wide)
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.leaderboard, color: pal.accent),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          t('st_rating_title'),
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: pal.text,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: t('co_refresh'),
-                        onPressed: _loading ? null : _load,
-                        icon: Icon(Icons.refresh, color: pal.subtext),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_me != null)
-                    Row(
-                      children: [
-                        _big('#${_me!['rank']}', t('st_rank')),
-                        const SizedBox(width: 10),
-                        _big('${_me!['rating']}', t('st_rating')),
-                        const SizedBox(width: 10),
-                        _big('${_me!['solved']}', t('st_solved')),
-                      ],
-                    )
-                  else if (!_loading && _error == null)
-                    Text(t('st_coach_note'),
-                        style: TextStyle(color: pal.subtext)),
-                  const SizedBox(height: 10),
-                  Text(
-                    t('st_points_hint'),
-                    style: TextStyle(fontSize: 12.5, color: pal.subtext),
-                  ),
+                  Expanded(child: leaders),
+                  const SizedBox(width: 16),
+                  Expanded(child: lazy),
                 ],
-              ),
-            ),
-            if (_loading)
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(t('co_loading'),
-                    style: TextStyle(color: pal.subtext)),
-              )
-            else if (_error != null)
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(_error!,
-                    style: const TextStyle(color: Colors.redAccent)),
               )
             else ...[
-              if (_items.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Text(t('co_no_students'),
-                      style: TextStyle(color: pal.subtext)),
-                ),
-              for (final r in _items) _row(r),
-              if (_total > _items.length)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Text('… $_total',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: pal.subtext)),
-                ),
+              leaders,
+              const SizedBox(height: 16),
+              lazy,
             ],
           ],
-        ));
+        ),
+      );
+    });
   }
+
+  Widget _sideHeading(IconData icon, String text) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+        decoration: BoxDecoration(
+          color: pal.accent.withAlpha(0x26),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: pal.accent.withAlpha(0x88)),
+        ),
+        child: Row(children: [
+          Icon(icon, color: pal.accent),
+          const SizedBox(width: 10),
+          Text(text,
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w900, color: pal.text)),
+        ]),
+      );
 
   Widget _big(String value, String label) => Expanded(
         child: Container(
@@ -804,7 +802,7 @@ class _StatsViewState extends State<StatsView> {
           for (final d in days)
             (s.planDone[AppSettings.dayKey(d)] ?? const <int>[]).length,
         ];
-        return PageFrame(child: ListView(
+        return ColumnsView(
               padding: const EdgeInsets.all(16),
               children: [
                 _card(
@@ -885,7 +883,7 @@ class _StatsViewState extends State<StatsView> {
                   _studentsCard(),
                 ],
               ],
-            ));
+            );
       },
     );
   }

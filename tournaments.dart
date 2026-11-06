@@ -86,10 +86,11 @@ class _TournamentsViewState extends State<TournamentsView> {
 
   @override
   Widget build(BuildContext context) {
-    return PageFrame(
-      child: ListView(
+    return ColumnsView(
         padding: const EdgeInsets.all(16),
+        fullFirst: true,
         children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             Icon(Icons.emoji_events, color: pal.accent),
             const SizedBox(width: 10),
@@ -143,10 +144,11 @@ class _TournamentsViewState extends State<TournamentsView> {
               child: Center(
                   child: Text(t('tr_none'), style: TextStyle(color: pal.subtext))),
             ),
+          ]),
           for (final x in _list)
             Card(
               color: pal.card,
-              margin: const EdgeInsets.symmetric(vertical: 4),
+              margin: EdgeInsets.zero,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
@@ -180,7 +182,6 @@ class _TournamentsViewState extends State<TournamentsView> {
               ),
             ),
         ],
-      ),
     );
   }
 }

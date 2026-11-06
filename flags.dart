@@ -195,3 +195,105 @@ class _GlobePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _GlobePainter old) => false;
 }
+
+
+/// Yarim 3D ko'rinishdagi rangli ikonka: gradient, yaltirash va soya.
+class Icon3D extends StatelessWidget {
+  const Icon3D({
+    super.key,
+    required this.icon,
+    required this.color,
+    this.size = 34,
+    this.circle = false,
+  });
+  final IconData icon;
+  final Color color;
+  final double size;
+  final bool circle;
+
+  @override
+  Widget build(BuildContext context) {
+    final light = Color.lerp(color, Colors.white, 0.38)!;
+    final dark = Color.lerp(color, Colors.black, 0.32)!;
+    final r = BorderRadius.circular(size * 0.3);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: circle ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: circle ? null : r,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [light, color, dark],
+          stops: const [0, 0.5, 1],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: dark.withAlpha(0x88),
+            blurRadius: size * 0.16,
+            offset: Offset(0, size * 0.08),
+          ),
+        ],
+        border: Border.all(color: Colors.white.withAlpha(0x55), width: 0.8),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            left: size * 0.1,
+            right: size * 0.1,
+            top: size * 0.05,
+            height: size * 0.34,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(size * 0.25),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.white.withAlpha(0x70), Colors.white.withAlpha(0x00)],
+                ),
+              ),
+            ),
+          ),
+          Icon(icon, size: size * 0.58, color: Colors.white, shadows: const [
+            Shadow(color: Color(0x66000000), blurRadius: 2, offset: Offset(0, 1)),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bo'lim rangi (panel ikonkalari uchun).
+Color tabColor(int i) => const [
+      Color(0xFF2E9E4F), // o'yin
+      Color(0xFFE59A14), // reyting
+      Color(0xFF2F7FD6), // statistika
+      Color(0xFF8A52CC), // vazifalar
+      Color(0xFF12A39A), // darsliklar
+      Color(0xFF6B7785), // sozlamalar
+      Color(0xFF18B5D8), // AI
+      Color(0xFFD9473B), // turnirlar
+    ][i.clamp(0, 7)];
+
+/// Ilovani yopish: qizil dumaloq X tugmasi.
+class CloseAppButton extends StatelessWidget {
+  const CloseAppButton({super.key, required this.onTap, this.tooltip = ''});
+  final VoidCallback onTap;
+  final String tooltip;
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: const Icon3D(
+            icon: Icons.close_rounded,
+            color: Color(0xFFD93025),
+            size: 38,
+            circle: true,
+          ),
+        ),
+      );
+}

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:chess/chess.dart' as ch;
 import 'package:flutter/material.dart';
+import 'page_frame.dart';
 
 import 'api.dart';
 import 'coach.dart';
@@ -201,27 +202,18 @@ class TasksView extends StatelessWidget {
         final done = kPuzzles.where((p) => settings.solved.containsKey('${p.id}')).length;
         final percent = total == 0 ? 0.0 : done / total;
 
-        return LayoutBuilder(builder: (context, box) {
-          final wide = box.maxWidth >= 900;
-          return Align(
-          alignment: Alignment.topLeft,
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(wide ? 40 : 16, 16, 16, 16),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: wide ? 1040 : 720),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (settings.role == 'coach')
-                    CoachCalendarCard(settings: settings, pal: pal)
-                  else
-                    DailyPlanCard(
-                      settings: settings,
-                      pal: pal,
-                      onPlay: onPlay,
-                      onOpen: (p) => _open(context, p),
-                    ),
-                  const SizedBox(height: 14),
+        return ColumnsView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (settings.role == 'coach')
+              CoachCalendarCard(settings: settings, pal: pal)
+            else
+              DailyPlanCard(
+                settings: settings,
+                pal: pal,
+                onPlay: onPlay,
+                onOpen: (p) => _open(context, p),
+              ),
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,24 +285,18 @@ class TasksView extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  PuzzleBrowser(
-                    settings: settings,
-                    pal: pal,
-                    onOpen: (p) => _open(context, p),
-                  ),
-                  const SizedBox(height: 14),
-                  CoachSection(
-                    settings: settings,
-                    pal: pal,
-                    onOpen: (p) => _open(context, p),
-                  ),
-                ],
-              ),
+            PuzzleBrowser(
+              settings: settings,
+              pal: pal,
+              onOpen: (p) => _open(context, p),
             ),
-          ),
-          );
-        });
+            CoachSection(
+              settings: settings,
+              pal: pal,
+              onOpen: (p) => _open(context, p),
+            ),
+          ],
+        );
       },
     );
   }

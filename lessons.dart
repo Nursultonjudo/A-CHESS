@@ -1262,9 +1262,11 @@ class _LessonsViewState extends State<LessonsView> {
 
   @override
   Widget build(BuildContext context) {
-    return PageFrame(child: ListView(
+    return ColumnsView(
           padding: const EdgeInsets.all(16),
+          fullFirst: true,
           children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(
               children: [
                 Icon(Icons.menu_book, color: pal.accent),
@@ -1292,12 +1294,13 @@ class _LessonsViewState extends State<LessonsView> {
             ),
             const SizedBox(height: 4),
             Text(t('ls_intro'), style: TextStyle(color: pal.subtext)),
+            ]),
             const SizedBox(height: 12),
             _materialsCard(),
             ListenableBuilder(listenable: s, builder: (_, __) => _savedCard()),
             ListenableBuilder(listenable: s, builder: (_, __) => _myFilesCard()),
             _gamesCard(),
           ],
-        ));
+        );
   }
 }

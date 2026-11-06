@@ -14,9 +14,11 @@ final ValueNotifier<int> chatUnread = ValueNotifier<int>(0);
 
 /// Yuqori o'ng burchakdagi xabar ikonkasi (o'qilmagan xabarlar soni bilan).
 class ChatButton extends StatelessWidget {
-  const ChatButton({super.key, required this.settings, required this.pal});
+  const ChatButton(
+      {super.key, required this.settings, required this.pal, this.width = 150});
   final AppSettings settings;
   final Pal pal;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
@@ -24,42 +26,78 @@ class ChatButton extends StatelessWidget {
       valueListenable: chatUnread,
       builder: (_, n, __) => Tooltip(
         message: tr(settings.lang, 'ch_title'),
-        child: Material(
-          color: pal.card,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: pal.cardBorder),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => showChatList(context, settings, pal),
-            child: SizedBox(
-              width: 42,
-              height: 38,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(Icons.chat_bubble_outline, size: 21, color: pal.subtext),
-                  if (n > 0)
-                    Positioned(
-                      right: 3,
-                      top: 1,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD93025),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: Text(
-                          n > 99 ? '99+' : '$n',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800),
+        child: SizedBox(
+          width: width,
+          height: 38,
+          child: Material(
+            color: pal.card,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: pal.cardBorder),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => showChatList(context, settings, pal),
+              child: Padding(
+                padding: EdgeInsets.only(left: width < 100 ? 0 : 12, right: width < 100 ? 0 : 5),
+                child: Row(
+                  mainAxisAlignment:
+                      width < 100 ? MainAxisAlignment.center : MainAxisAlignment.start,
+                  children: [
+                    if (width >= 100)
+                    Expanded(
+                      child: Text(
+                        tr(settings.lang, 'ch_label'),
+                        style: TextStyle(
+                          color: pal.subtext.withAlpha(0xDD),
+                          fontSize: 14,
                         ),
                       ),
                     ),
-                ],
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 29,
+                          height: 29,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                pal.accent.withAlpha(0xFF),
+                                Color.lerp(pal.accent, Colors.black, 0.25)!,
+                              ],
+                            ),
+                          ),
+                          child: const Icon(Icons.chat_bubble,
+                              size: 16, color: Colors.white),
+                        ),
+                        if (n > 0)
+                          Positioned(
+                            right: -5,
+                            top: -6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD93025),
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Text(
+                                n > 99 ? '99+' : '$n',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

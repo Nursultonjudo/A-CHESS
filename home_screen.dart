@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform, exit;
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:chess/chess.dart' as ch;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../page_frame.dart';
@@ -819,18 +821,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Yuqori o'ng qator: foydalanuvchi qidirish tugmasi (partiya tugaganda natija ham).
   Widget _statusCard() {
     final over = _over;
-    return Row(
-      children: [
-        if (over)
-          Expanded(child: _resultChip())
-        else
-          const Spacer(),
-        const SizedBox(width: 8),
-        ChatButton(settings: s, pal: pal),
-        const SizedBox(width: 8),
-        PeopleSearchButton(settings: s, pal: pal),
-      ],
-    );
+    return LayoutBuilder(builder: (context, box) {
+      final narrow = box.maxWidth < 560;
+      return Row(
+        children: [
+          if (over)
+            Expanded(child: _resultChip())
+          else
+            const Spacer(),
+          const SizedBox(width: 8),
+          ChatButton(settings: s, pal: pal, width: narrow ? 48 : 150),
+          const SizedBox(width: 8),
+          PeopleSearchButton(settings: s, pal: pal, width: narrow ? 110 : 190),
+          SizedBox(width: narrow ? 10 : 18),
+          CloseAppButton(tooltip: t('close_app'), onTap: _closeApp),
+        ],
+      );
+    });
+  }
+
+  Future<void> _closeApp() async {
+    try {
+      await syncProgress(s).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+    if (kIsWeb) return;
+    if (Platform.isAndroid || Platform.isIOS) {
+      await SystemNavigator.pop();
+    } else {
+      exit(0);
+    }
   }
 
   Widget _resultChip() {
@@ -951,13 +970,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     Icon(
                       s.bestHint ? Icons.lightbulb : Icons.lightbulb_outline,
-                      size: 16,
+                      size: 28,
                       color: w.accent,
                     ),
-                    Switch(
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      value: s.bestHint,
-                      onChanged: (v) => s.setBestHint(v),
+                    SizedBox(
+                      width: 46,
+                      height: 28,
+                      child: FittedBox(
+                        child: Switch(
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          value: s.bestHint,
+                          onChanged: (v) => s.setBestHint(v),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1594,7 +1619,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       (false, Icons.light_mode_outlined, t('light')),
       (true, Icons.dark_mode_outlined, t('dark')),
     ];
-    return PageFrame(child: ListView(
+    return ColumnsView(
           padding: const EdgeInsets.all(16),
           children: [
             Container(
@@ -1652,7 +1677,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: w.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: w.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   _sectionTitle('theme'),
                   Row(
                     children: [
@@ -1673,7 +1710,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: w.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: w.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: w.accent,
@@ -1761,12 +1810,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     },
                   ),
                   const SizedBox(height: 12),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: w.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: w.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   ..._appearanceSections(w),
                 ],
               ),
             ),
           ],
-        ));
+        );
   }
 
   // ---- Shaxsiy kabinet ----------------------------------------------------
@@ -1879,7 +1941,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(children: [
-                const SizedBox(width: 44),
+                const SizedBox(width: 120),
                 Expanded(
                   child: Text(
                     t('profile'),
@@ -1891,7 +1953,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
-                ChatButton(settings: s, pal: pal),
+                ChatButton(settings: s, pal: pal, width: 120),
               ]),
               const SizedBox(height: 20),
               Center(
@@ -2508,7 +2570,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
               onTap: onTap,
-              child: Icon(icon, size: 26 * scale, color: pal.navText),
+              child: Center(
+                child: Icon3D(
+                    icon: icon,
+                    color: const Color(0xFFE0593A),
+                    size: 32 * scale),
+              ),
             ),
           ),
         ),
@@ -2565,7 +2632,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             child: Row(
               children: [
-                Icon(icon, size: 24, color: sel ? pal.accent : pal.navIcon),
+                Icon3D(icon: icon, color: tabColor(i), size: 30),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
@@ -2793,8 +2860,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       surfaceTintColor: Colors.transparent,
       onDestinationSelected: _selectTab,
       destinations: [
-        for (final tab in tabs)
-          NavigationDestination(icon: Icon(tab.$1), label: tab.$2),
+        for (var i = 0; i < tabs.length; i++)
+          NavigationDestination(
+              icon: Icon3D(icon: tabs[i].$1, color: tabColor(i), size: 26),
+              label: tabs[i].$2),
       ],
     );
   }
