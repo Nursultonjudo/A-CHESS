@@ -2402,13 +2402,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        for (var i = 0; i < 2; i++) ...[
+                        for (var i = 0; i < 3; i++) ...[
                           if (i > 0) const SizedBox(width: 10),
                           Expanded(
                             child: _optionCard(
                               selected: s.pieceSet == i,
                               onTap: () => s.setPieceSet(i),
-                              label: t(i == 0 ? 'pieces_classic' : 'pieces_old'),
+                              label: i == 0
+                                  ? t('pieces_classic')
+                                  : (i == 1 ? 'Charcoal' : 'Emerald'),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
